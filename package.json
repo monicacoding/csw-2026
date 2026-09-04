@@ -1,0 +1,11 @@
+{
+  "name": "csw-2026-extra-mile-hub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Customer Service Week 2026 — \"We Go the Extra Mile\" activities hub. Static site, currently running on a localStorage-backed mock data layer ahead of a Firebase swap.",
+  "scripts": {
+    "build": "node build.js",
+    "start": "npx serve .",
+    "dev": "npx serve ."
+  }
+}

@@ -1,0 +1,44 @@
+/* CSW 2026 — "We Go the Extra Mile" — brand tokens */
+:root {
+  /* palette */
+  --cream: #FBF1E4;
+  --cream-dark: #F3E4CE;
+  --sage: #E7EEE9;
+  --sage-dark: #D5E2DA;
+  --navy: #1D3557;
+  --navy-soft: #2C4770;
+  --brick: #9C3B2E;
+  --brick-dark: #7C2E23;
+  --gold: #F2A73B;
+  --gold-dark: #D98F22;
+  --white: #FFFFFF;
+  --ink: #1D3557;
+  --ink-soft: #52607A;
+
+  /* status */
+  --success: #4C8C63;
+  --locked: #B9C2CE;
+
+  /* type */
+  --font-display: 'Archivo Black', 'Arial Black', sans-serif;
+  --font-body: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+
+  /* radii + shadow */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 2px 8px rgba(29, 53, 87, 0.08);
+  --shadow-md: 0 6px 20px rgba(29, 53, 87, 0.12);
+  --shadow-lg: 0 12px 32px rgba(29, 53, 87, 0.16);
+
+  /* spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+}

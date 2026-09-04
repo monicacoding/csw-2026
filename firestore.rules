@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------------
+// Intentionally open rules, scoped to only the collections this app uses.
+// There is no real authentication here (see README.md) — this is a
+// low-friction internal tool for one fun week, not a security boundary.
+// Paste into Firebase Console → Firestore → Rules, or deploy with:
+//   firebase deploy --only firestore:rules
+// ---------------------------------------------------------------------------
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{code} {
+      allow read, write: if code.matches('^[A-Z]{4}$');
+    }
+
+    match /hyperlinkRaceEntries/{code} {
+      allow read, write: if code.matches('^[A-Z]{4}$');
+    }
+
+    match /snapJudgementEntries/{code} {
+      allow read, write: if code.matches('^[A-Z]{4}$');
+    }
+
+    match /triviaEntries/{code} {
+      allow read, write: if code.matches('^[A-Z]{4}$');
+    }
+
+    match /photoFinishEntries/{code} {
+      allow read, write: if code.matches('^[A-Z]{4}$');
+
+      match /votes/{voterCode} {
+        allow read, write: if voterCode.matches('^[A-Z]{4}$');
+      }
+    }
+
+    match /nominations/{code} {
+      allow read, write: if code.matches('^[A-Z]{4}$');
+    }
+
+    match /minigameEntries/{code} {
+      allow read, write: if code.matches('^[A-Z]{4}$');
+    }
+
+    // Everything else stays locked down.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

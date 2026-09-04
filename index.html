@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Extra Mile Hub — Customer Service Week 2026</title>
+<link rel="stylesheet" href="css/sketch.css" />
+</head>
+<body>
+
+  <!-- ============ Login overlay ============ -->
+  <div id="loginScreen">
+    <div class="mascot-block" id="mascotMount"></div>
+    <div class="sketch-card login-card">
+      <div class="doodle-tag">Customer Service Week 2026</div>
+      <h1 class="login-title">We Go the<br /><span>Extra Mile</span></h1>
+      <p class="login-sub">Enter your 4-letter short login to hop in the driver's seat.</p>
+      <form id="loginForm">
+        <input class="code-input" id="codeInput" maxlength="4" autocomplete="off" placeholder="ABCD" />
+        <p class="code-hint">4 capital letters — e.g. "ABCD". First time? We'll set you up.</p>
+
+        <div class="pin-field">
+          <label for="pinInput">4-Digit PIN</label>
+          <input class="code-input pin-input" id="pinInput" maxlength="4" type="password" inputmode="numeric" autocomplete="off" placeholder="••••" />
+        </div>
+        <p class="code-hint">First time? This PIN will be saved for next time.</p>
+
+        <p class="login-error" id="loginError" hidden></p>
+
+        <button class="doodle-btn login-btn" type="submit">Start Your Engine</button>
+        <button type="button" class="forgot-pin-link" id="forgotPinBtn">Forgot your PIN?</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ Main hub (single continuous canvas) ============ -->
+  <div id="appRoot" style="display:none;">
+    <main class="canvas-main">
+
+      <div class="hub-hero">
+        <div class="doodle-tag">Customer Service Week 2026</div>
+        <h1 class="sketch-title hub-hero__title">We Go the <span style="color:var(--brick);">Extra Mile</span></h1>
+      </div>
+
+      <!-- Race track strip — the anchor of the page -->
+      <div class="track-wrap">
+        <div class="track-hint">👆 Hover a day for the full schedule</div>
+        <div class="track-road" id="trackRoad"></div>
+        <div class="track-markers" id="trackMarkers"></div>
+      </div>
+
+      <!-- Activities board — flows directly from the track, nothing in between -->
+      <section class="board-section">
+        <h2 class="sketch-title activities-title">This Week's Activities</h2>
+        <div class="activity-grid" id="activityGrid"></div>
+      </section>
+
+    </main>
+
+    <!-- Mascot lives here now, pinned to the corner, independent of the track -->
+    <div class="track-mascot" id="trackMascot"></div>
+
+    <!-- Leaderboard/Bingo Card float free of the main content flow -->
+    <div class="utility-dock" id="utilityDock">
+      <button class="doodle-btn sm" id="openLeaderboardBtn"><span>🏆</span><span>Leaderboard</span></button>
+      <button class="doodle-btn sm brick" id="openBingoBtn"><span>🎯</span><span>Bingo Card</span></button>
+    </div>
+  </div>
+
+  <script src="data/schedule.js"></script>
+  <script src="data/trivia-questions.js"></script>
+  <script src="data/ms-products.js"></script>
+  <script src="js/mock-db.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/icons.js"></script>
+  <script src="js/mascot.js"></script>
+  <script src="js/minigame.js"></script>
+  <script src="js/games.js"></script>
+  <script src="js/cursor.js"></script>
+  <script src="js/cursor-picker.js"></script>
+  <script src="js/ambient.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.getElementById('openLeaderboardBtn').addEventListener('click', () => App.openLeaderboardModal());
+    document.getElementById('openBingoBtn').addEventListener('click', () => App.openBingoModal());
+  </script>
+</body>
+</html>
