@@ -4,19 +4,29 @@
 // ---------------------------------------------------------------------------
 
 const AppState = (() => {
-  // Per-activity state: 'locked' | 'active' | 'done' | 'missed'.
+  // Per-activity state: 'locked' | 'active' | 'done' | 'expired'.
   //
   // Most activities are only "active" on their own scheduled day (their
-  // implicit closesAfter === day.date). An activity can opt into a longer
-  // open window via `closesAfter` on its schedule entry — it's "active" for
-  // every day from its unlock date through closesAfter, and only "missed"
-  // once that whole window has passed without a submission.
-  function activityTileState(activity, submitted, day, todayStr) {
+  // implicit closesAfter === day.date, i.e. their deadline is end of that
+  // day). An activity can opt into a longer open window via `closesAfter`
+  // on its schedule entry — it's "active" for every day from its unlock
+  // date through closesAfter, and only "expired" once that whole window has
+  // passed without a submission (no late submissions past a deadline).
+  //
+  // `weekLocked` (the hard end-of-week global switch — see
+  // data/schedule.js's isWeekLocked) is checked before any of that: once
+  // the week has ended, every not-yet-completed activity is "expired"
+  // regardless of its own individual unlock/deadline — a global override,
+  // not just another deadline. A completed activity is always "done"
+  // first, even past its deadline or past week-end — completed work stays
+  // viewable indefinitely (see js/app.js's activityClickPolicy).
+  function activityTileState(activity, submitted, day, todayStr, weekLocked = false) {
+    if (submitted) return 'done';
+    if (weekLocked) return 'expired';
     const closesAfter = activity.closesAfter || day.date;
     if (todayStr < day.date) return 'locked';
-    if (submitted) return 'done';
     if (todayStr <= closesAfter) return 'active';
-    return 'missed'; // its whole open window has passed, never submitted
+    return 'expired'; // its whole open window has passed, never submitted
   }
 
   // A day can now carry more than one remote activity (Race Day Trivia
@@ -31,22 +41,23 @@ const AppState = (() => {
   // missed window since none of them carry a custom `closesAfter` anymore,
   // so this mainly just decides "done" vs "not yet."
   function computeDashboardDays(user, todayStr = todayLocalDateString()) {
+    const weekLocked = isWeekLocked(todayStr);
     const bingo = { ...Store.emptyBingo(), ...(user?.bingo || {}) };
     return CSW_SCHEDULE.map((day) => {
       const remoteActivities = day.activities.filter((a) => a.type !== 'onsite');
       const activityStates = remoteActivities.map((activity) => {
         const submitted = !!bingo[activity.id];
-        return { activity, submitted, tileState: activityTileState(activity, submitted, day, todayStr) };
+        return { activity, submitted, tileState: activityTileState(activity, submitted, day, todayStr, weekLocked) };
       });
 
       let tileState;
       if (activityStates.every((s) => s.tileState === 'done')) tileState = 'done';
       else if (activityStates.some((s) => s.tileState === 'locked')) tileState = 'locked';
       else if (activityStates.some((s) => s.tileState === 'active')) tileState = 'active';
-      else tileState = 'missed';
+      else tileState = 'expired';
 
       const status = dayStatus(day, todayStr); // locked | active | past — the raw calendar-day status
-      return { day, activityStates, status, tileState };
+      return { day, activityStates, status, tileState, weekLocked };
     });
   }
 
@@ -68,7 +79,7 @@ const AppState = (() => {
     return bingoCoreComplete(user) && !!bingo.bonus;
   }
 
-  return { computeDashboardDays, completedDayCount, bingoCoreComplete, bingoFullHouse };
+  return { computeDashboardDays, completedDayCount, bingoCoreComplete, bingoFullHouse, activityTileState };
 })();
 
 window.AppState = AppState;

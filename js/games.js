@@ -113,10 +113,22 @@ const Games = (() => {
     return null;
   }
 
+  // "Read-only view of their submission" (rather than a bare "you're done"
+  // message) for the three activities whose only post-submit screen is this
+  // shared one — Photo Finish and Nomination get theirs for free via the
+  // Gallery/Recognition Wall they already re-render into.
+  function hyperlinkResultMessage(entry) {
+    if (!entry) return "✅ You've already completed the Hyperlink Race!";
+    const seconds = Math.round((entry.elapsedMs || 0) / 1000);
+    const time = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+    return `✅ You finished in ${time}${entry.dateCorrect ? '' : ' (the date answer was off)'} — ${entry.score} pts.`;
+  }
+
   async function hyperlinkRace(body, user, day, ctx) {
     const already = await Store.hasSubmitted('hyperlinkRaceEntries', user.code);
     if (already) {
-      renderAlreadyCompleted(body, day, 'Hyperlink Race', "✅ You've already completed the Hyperlink Race!", 'hyperlinkRaceEntries');
+      const entry = await Store.getEntry('hyperlinkRaceEntries', user.code);
+      renderAlreadyCompleted(body, day, 'Hyperlink Race', hyperlinkResultMessage(entry), 'hyperlinkRaceEntries');
       return;
     }
     if (window.isMobileViewport && window.isMobileViewport()) {
@@ -208,10 +220,16 @@ const Games = (() => {
   const SJ_MAX_SECONDS_PER_ROUND = 40; // pace at/beyond which the speed bonus is zero
   const SJ_MAX_SPEED_BONUS_PER_CORRECT = 20;
 
+  function snapResultMessage(entry) {
+    if (!entry) return "✅ You've already made your guesses!";
+    return `✅ You scored ${entry.score} pts — ${entry.correctCount}/${entry.totalRounds} correct.`;
+  }
+
   async function snapJudgement(body, user, day, ctx) {
     const already = await Store.hasSubmitted('snapJudgementEntries', user.code);
     if (already) {
-      renderAlreadyCompleted(body, day, 'Snap Judgement', "✅ You've already made your guesses!", 'snapJudgementEntries');
+      const entry = await Store.getEntry('snapJudgementEntries', user.code);
+      renderAlreadyCompleted(body, day, 'Snap Judgement', snapResultMessage(entry), 'snapJudgementEntries');
       return;
     }
     if (window.isMobileViewport && window.isMobileViewport()) {
@@ -393,11 +411,13 @@ const Games = (() => {
     const dayId = day.id; // 'mon'..'fri' — which day's 5-question set this is
     const already = await Store.hasSubmittedTriviaDay(user.code, dayId);
     if (already) {
+      const entry = await Store.getTriviaDayEntry(user.code, dayId);
       const cumulative = user.triviaTotalScore || 0;
       const daysCompleted = triviaDaysCompleted(user);
+      const todayLine = entry ? `You scored ${entry.score} pts (${entry.correctCount}/${entry.totalQuestions} correct) today. ` : '';
       renderAlreadyCompleted(
         body, day, 'Race Day Trivia',
-        `✅ You've already completed today's trivia! Cumulative score: ${cumulative} pts across ${daysCompleted} / ${TRIVIA_DAY_ORDER.length} days.`,
+        `✅ ${todayLine}Cumulative score: ${cumulative} pts across ${daysCompleted} / ${TRIVIA_DAY_ORDER.length} days.`,
         'triviaEntries',
       );
       return;
@@ -504,17 +524,37 @@ const Games = (() => {
   }
 
   // ---------------- Photo Finish (Wednesday · The Halfway Mile) ----------------
+  // Reachable in three distinct access modes now (see js/app.js's
+  // activityClickPolicy, which decides which of these ever gets this far):
+  //  - normal (active, not yet submitted): submit form + Gallery, as always.
+  //  - already submitted: no form, Gallery + voting, as always — stays
+  //    reachable indefinitely, including past week-end (ctx.weekLocked).
+  //  - ctx.viewOnly: this user's own deadline passed without a submission,
+  //    but the week itself hasn't ended — browsing shouldn't be gated
+  //    behind having personally participated, so Gallery + voting still
+  //    work, just with no submit form.
+  // ctx.weekLocked (the global end-of-week switch) overrides voting in every
+  // one of those: once it's true, this is strictly read-only — no new
+  // submissions (already blocked upstream) and no new votes either.
   async function photoFinish(body, user, day, ctx) {
     body.innerHTML = modalHeader(day, 'Photo Finish') + `
       <div id="pfSubmitArea"></div>
       <h3 style="color:var(--navy);margin:22px 0 10px;font-size:16px;">Gallery</h3>
-      <p class="gallery-rules">🗳️ Voting rules: you get <strong>one vote, total</strong> — and you can't vote for your own entry.</p>
+      ${ctx.weekLocked ? '' : `<p class="gallery-rules">🗳️ Voting rules: you get <strong>one vote, total</strong> — and you can't vote for your own entry.</p>`}
       <div id="pfGallery" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"></div>`;
 
     const submitArea = body.querySelector('#pfSubmitArea');
     const already = await Store.hasSubmitted('photoFinishEntries', user.code);
     if (already) {
       submitArea.innerHTML = `<p style="color:var(--success);font-weight:700;">✅ You've already submitted your Photo Finish entry!</p>`;
+    } else if (ctx.weekLocked) {
+      // Shouldn't normally be reachable — openActivityModal only lets a
+      // not-yet-submitted activity through when weekLocked is false — but
+      // guard it anyway rather than silently show a submit form that would
+      // fail server-side.
+      submitArea.innerHTML = `<p style="color:var(--ink-soft);font-weight:700;">🏁 Customer Service Week has wrapped — Photo Finish submissions are closed.</p>`;
+    } else if (ctx.viewOnly) {
+      submitArea.innerHTML = `<p style="color:var(--ink-soft);font-weight:700;">⏳ The submission window for Photo Finish has closed — but you can still browse the gallery and vote below!</p>`;
     } else {
       submitArea.innerHTML = `
         <div class="field">
@@ -594,6 +634,13 @@ const Games = (() => {
         </div>`).join('');
       grid.querySelectorAll('.vote-btn').forEach((btn) => {
         if (btn.disabled) return;
+        // The global week-end lockout stops voting even for an already-
+        // submitted entry's owner — see photoFinish's own comment above.
+        if (ctx.weekLocked) {
+          btn.disabled = true;
+          btn.title = 'Voting is closed — Customer Service Week has wrapped.';
+          return;
+        }
         btn.addEventListener('click', async () => {
           const entryCode = btn.dataset.code;
           if (votedSet.has(entryCode)) return;
@@ -612,10 +659,25 @@ const Games = (() => {
   // ---------------- Nomination (Friday · Crossing the Finish Line) ----------------
   const NOMINATION_EMOJIS = ['🏆', '⭐', '🔥', '🎉', '👏', '🥇', '🚀', '💪', '🙌', '🎯', '🏅', '✨'];
 
+  // Same three access modes as Photo Finish above — see its comment.
   async function nomination(body, user, day, ctx) {
     const already = await Store.hasSubmitted('nominations', user.code);
     if (already) {
       await renderRecognitionWall(body, day);
+      return;
+    }
+    if (ctx.weekLocked) {
+      // Shouldn't normally be reachable — see the matching guard in
+      // photoFinish above — but fail safe rather than show a live form.
+      body.innerHTML = modalHeader(day, 'Who Went The Extra Mile?') + `
+        <p style="text-align:center;color:var(--ink-soft);font-weight:700;">🏁 Customer Service Week has wrapped — nominations are closed.</p>`;
+      return;
+    }
+    if (ctx.viewOnly) {
+      // Deadline passed without this user submitting, but the week's still
+      // on — browsing the Wall shouldn't be gated behind having nominated
+      // someone yourself.
+      await renderRecognitionWall(body, day, true);
       return;
     }
     renderNominationForm(body, user, day, ctx);
@@ -673,10 +735,17 @@ const Games = (() => {
   // scroll container of its own (the modal's own overflow-y handles it,
   // same as the Gallery), rather than a second, differently-behaved list
   // implementation.
-  async function renderRecognitionWall(body, day) {
+  //
+  // `windowClosed`: true only for the browse-only carve-out (ctx.viewOnly
+  // in nomination() above) — a visitor who never submitted their own
+  // nomination, so "Thanks for recognizing a teammate!" would be false for
+  // them; a different intro line explains why they're only browsing.
+  async function renderRecognitionWall(body, day, windowClosed = false) {
     const entries = await Store.getNominations();
-    body.innerHTML = modalHeader(day, 'Who Went The Extra Mile?') + `
-      <p style="text-align:center;color:var(--success);font-weight:700;">✅ Thanks for recognizing a teammate!</p>
+    const introHTML = windowClosed
+      ? `<p style="text-align:center;color:var(--ink-soft);font-weight:700;">⏳ The nomination window has closed — here's the Recognition Wall so far.</p>`
+      : `<p style="text-align:center;color:var(--success);font-weight:700;">✅ Thanks for recognizing a teammate!</p>`;
+    body.innerHTML = modalHeader(day, 'Who Went The Extra Mile?') + introHTML + `
       <h3 style="color:var(--navy);margin:22px 0 10px;font-size:16px;">🏆 Recognition Wall</h3>
       <div id="recognitionWall" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"></div>`;
     const wall = body.querySelector('#recognitionWall');

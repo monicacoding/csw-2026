@@ -145,6 +145,15 @@ const Store = (() => {
     return !!(await FirestoreDB.getDoc(collection, code));
   }
 
+  // The raw stored entry itself (not just whether one exists) — used to
+  // show a user a read-only view of their own actual result once an
+  // activity card shows as "Completed" (see js/games.js's renderAlreadyCompleted
+  // call sites, which read real score/answer fields off this rather than
+  // just a generic "you're done" message).
+  async function getEntry(collection, code) {
+    return FirestoreDB.getDoc(collection, code);
+  }
+
   // ---- Race Day Trivia: daily + cumulative -------------------------------
   // Each day's 5-question set is its own submission, stored as a real
   // Firestore subcollection doc (triviaEntries/{code}/days/{dayId}) rather
@@ -188,6 +197,14 @@ const Store = (() => {
   async function hasSubmittedTriviaDay(code, dayId) {
     const daysCollection = FirestoreDB.subPath('triviaEntries', code, 'days');
     return !!(await FirestoreDB.getDoc(daysCollection, dayId));
+  }
+
+  // The raw stored entry for one specific day's trivia round — same
+  // "read-only view of your own result" purpose as getEntry above, just
+  // scoped to the days/{dayId} subcollection instead of a flat collection.
+  async function getTriviaDayEntry(code, dayId) {
+    const daysCollection = FirestoreDB.subPath('triviaEntries', code, 'days');
+    return FirestoreDB.getDoc(daysCollection, dayId);
   }
 
   // Every trivia day this user has completed so far — used to show "days
@@ -280,8 +297,10 @@ const Store = (() => {
     touchLastSeen,
     submitEntry,
     hasSubmitted,
+    getEntry,
     submitTriviaDay,
     hasSubmittedTriviaDay,
+    getTriviaDayEntry,
     getTriviaDaysCompleted,
     getLeaderboard,
     getCombinedLeaderboard,

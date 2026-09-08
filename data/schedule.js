@@ -114,6 +114,34 @@ function dayStatus(day, todayStr = todayLocalDateString()) {
   return 'past';
 }
 
+// Hard end of Customer Service Week — end of the last scheduled day (Friday).
+// Once "today" (real or previewed) is past this date, the whole app goes
+// view-only: no activity — including the secret mini-game, even for someone
+// who's never found it — can be started or played, regardless of its own
+// individual unlock/deadline. This is a single global switch that overrides
+// all per-activity day-gating (js/state.js's activityTileState checks it
+// first, before any per-activity locked/active/expired logic). Derived from
+// the schedule itself (the last day's date) rather than hardcoded a second
+// time, so adding/removing a day here keeps it correct automatically.
+const CSW_WEEK_END_DATE = CSW_SCHEDULE[CSW_SCHEDULE.length - 1].date;
+
+function isWeekLocked(todayStr = todayLocalDateString()) {
+  return todayStr > CSW_WEEK_END_DATE;
+}
+
+// '2026-10-09' + 1 -> '2026-10-10'. Local-time date arithmetic (no UTC
+// surprises), used by the preview strip to offer a one-click "day after the
+// week ends" jump so the view-only lockout is actually testable, the same
+// way the existing day buttons let you preview each day's unlock.
+function addDaysToDateString(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function findActivityDay(activityId) {
   return CSW_SCHEDULE.find((d) => d.activities.some((a) => a.id === activityId));
 }
@@ -145,4 +173,7 @@ if (typeof window !== 'undefined') {
   window.findActivity = findActivity;
   window.isActivityUnlocked = isActivityUnlocked;
   window.formatShortDate = formatShortDate;
+  window.CSW_WEEK_END_DATE = CSW_WEEK_END_DATE;
+  window.isWeekLocked = isWeekLocked;
+  window.addDaysToDateString = addDaysToDateString;
 }

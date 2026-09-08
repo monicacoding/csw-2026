@@ -24,6 +24,77 @@ const Toast = (() => {
 })();
 window.Toast = Toast;
 
+// Photo Finish and Who Went The Extra Mile are the two activities whose
+// Gallery/Recognition Wall is shared, browsable content — not gated behind
+// having personally submitted. See activityClickPolicy below for the full
+// rule this backs: once their own submission deadline has passed without an
+// entry, every other activity goes fully non-clickable ("expired"), but
+// these two instead open in a distinct browse-only mode (ctx.viewOnly — see
+// js/games.js) so a non-participant can still view entries, and for Photo
+// Finish specifically still vote. That exception itself does not survive
+// the global week-end lockout — see activityClickPolicy's weekLocked check,
+// which is tested before the gallery-type carve-out.
+const GALLERY_ACTIVITY_IDS = new Set(['photoFinish', 'nomination']);
+const GALLERY_VIEW_LABEL = { photoFinish: 'View Gallery', nomination: 'View Wall' };
+const GALLERY_VIEW_TOOLTIP = {
+  photoFinish: "This activity's submission window has closed, but you can still browse the gallery and vote.",
+  nomination: "This activity's submission window has closed, but you can still browse the Recognition Wall.",
+};
+
+// The single source of truth for whether a given activity card/modal-open
+// attempt is allowed right now, and why not when it isn't. Used both to
+// decide each card's button styling (activityCtaMeta below) and, in
+// openActivityModal, as the actual enforcement point — not just the card
+// click handler — so this can't be bypassed by any other entry point
+// (the Bingo Card's cells, a deep link, etc. — see openActivityModal).
+//   - done wins over everything: a completed activity stays open
+//     (read-only) indefinitely, even past its deadline or past week-end.
+//   - weekLocked (the global end-of-week switch) is checked next and
+//     overrides all individual per-activity gating once triggered — see
+//     data/schedule.js's isWeekLocked and js/state.js's activityTileState.
+//   - otherwise it's the activity's own locked/active/expired state, with
+//     one carve-out: an expired (deadline passed, never submitted) Photo
+//     Finish or Nomination still opens, in a distinct browse-only mode.
+function activityClickPolicy({ activity, tileState, weekLocked }) {
+  if (tileState === 'done') return { open: true, mode: 'done' };
+  if (weekLocked) return { open: false, reason: 'weekLocked' };
+  if (tileState === 'active') return { open: true, mode: 'active' };
+  if (tileState === 'locked') return { open: false, reason: 'locked' };
+  // tileState === 'expired'
+  if (GALLERY_ACTIVITY_IDS.has(activity.id)) return { open: true, mode: 'view' };
+  return { open: false, reason: 'expired' };
+}
+
+// Icon/label/style/tooltip for the card's button-like state element —
+// every state renders as this same kind of pill (doodle-btn), never plain
+// status text, so "what can I do with this card right now" always reads
+// the same way regardless of which of the five states it's in.
+function activityCtaMeta({ day, activity, tileState, weekLocked }, policy) {
+  if (tileState === 'done') {
+    return { icon: '✓', label: 'Completed', cls: 'cta-done', tooltip: "You've already completed this — tap to view your result." };
+  }
+  if (weekLocked) {
+    return { icon: '🏁', label: 'Week Ended', cls: 'cta-disabled', tooltip: 'Customer Service Week has wrapped — everything is now view-only.' };
+  }
+  if (tileState === 'locked') {
+    return { icon: '🔒', label: 'Locked', cls: 'cta-disabled', tooltip: `Unlocks ${day.label} · ${formatShortDate(day.date)}` };
+  }
+  if (tileState === 'active') {
+    return { icon: '▶', label: 'Play', cls: '', tooltip: 'Tap to play' };
+  }
+  // expired
+  if (policy.open) { // the Photo Finish / Nomination browse-only carve-out
+    return { icon: '👀', label: GALLERY_VIEW_LABEL[activity.id] || 'View', cls: 'cta-view', tooltip: GALLERY_VIEW_TOOLTIP[activity.id] || 'Browse-only — the submission window has closed.' };
+  }
+  return { icon: '⏳', label: 'Expired', cls: 'cta-disabled', tooltip: "This activity's submission window has closed — no late submissions." };
+}
+
+function activityBlockedToast(policy, day) {
+  if (policy.reason === 'weekLocked') return '🏁 Customer Service Week has wrapped — everything is now view-only.';
+  if (policy.reason === 'locked') return `🔒 Not unlocked yet — opens ${day.label} (${formatShortDate(day.date)}).`;
+  return "⏳ This activity's window has closed — no late submissions.";
+}
+
 const App = (() => {
   let currentUser = null;
 
@@ -328,6 +399,7 @@ const App = (() => {
     Cursor.setGlyph(currentUser.cursorGlyph || '🏎️');
     renderPlayerBadge();
     renderPreviewStrip();
+    renderWeekLockedBanner();
     renderTrack();
     renderTriviaSection();
     renderActivityBoard();
@@ -377,6 +449,11 @@ const App = (() => {
     const dayBtns = CSW_SCHEDULE.map((d) =>
       `<button data-date="${d.date}" class="${d.date === currentOverride ? 'is-active' : ''}">${d.label.slice(0,3)}</button>`
     ).join('');
+    // One more jump: the day after the week's hard end date, so the new
+    // global view-only lockout (point 1 — see data/schedule.js's
+    // isWeekLocked) is actually reachable for testing, the same way the day
+    // buttons make each individual unlock reachable.
+    const postWeekDate = addDaysToDateString(CSW_WEEK_END_DATE, 1);
     // No "Reset" button anymore — it used to call MockDB.reset(), wiping
     // the entire local mock database for quick testing. That was safe
     // against a throwaway localStorage blob; against this real, shared
@@ -388,6 +465,7 @@ const App = (() => {
     strip.innerHTML = `
       <span>🔧 PREVIEW —</span>
       ${dayBtns}
+      <button data-date="${postWeekDate}" class="${postWeekDate === currentOverride ? 'is-active' : ''}">Post-Week</button>
       <button data-date="">Real</button>
     `;
     strip.querySelectorAll('button[data-date]').forEach((btn) => {
@@ -397,6 +475,23 @@ const App = (() => {
         showHub();
       });
     });
+  }
+
+  // The global view-only banner (point 1's hard end-of-week switch) — shown
+  // above the track whenever isWeekLocked() is true, so a grayed-out board
+  // reads as "the week is over," not as "something's broken." Removed
+  // entirely (not just hidden) once the week isn't locked, so a "Real"/day
+  // preview jump back can't leave a stale banner behind.
+  function renderWeekLockedBanner() {
+    let banner = document.getElementById('weekLockedBanner');
+    if (!isWeekLocked()) { banner?.remove(); return; }
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'weekLockedBanner';
+      banner.className = 'week-locked-banner';
+      document.querySelector('.canvas-main')?.prepend(banner);
+    }
+    banner.innerHTML = `🏁 <strong>Customer Service Week has wrapped!</strong> Everything below is now view-only — thanks for playing.`;
   }
 
   // Shared content for both the desktop hover popover and the mobile tap
@@ -462,8 +557,8 @@ const App = (() => {
 
     const markers = document.getElementById('trackMarkers');
     markers.innerHTML = days.map((d) => {
-      const cls = d.tileState === 'done' ? 'past' : d.tileState === 'active' ? 'active' : d.tileState === 'missed' ? 'missed' : '';
-      const glyph = d.tileState === 'done' ? '✓' : d.tileState === 'missed' ? '✕' : d.day.label[0];
+      const cls = d.tileState === 'done' ? 'past' : d.tileState === 'active' ? 'active' : d.tileState === 'expired' ? 'expired' : '';
+      const glyph = d.tileState === 'done' ? '✓' : d.tileState === 'expired' ? '✕' : d.day.label[0];
       const activityNames = d.activityStates.map((s) => s.activity.title).join(', ');
       return `<div class="track-marker ${cls}" tabindex="0" aria-label="${d.day.label}: ${d.day.theme} — ${activityNames}">
                 <div class="track-marker-label">${d.day.label}<span class="track-marker-date">${formatShortDate(d.day.date)}</span></div>
@@ -500,32 +595,38 @@ const App = (() => {
   }
 
   // Shared by both the main activity board and the dedicated Race Day
-  // Trivia section below — same card markup either way.
-  function activityCardHTML({ day, activity, tileState }, i) {
+  // Trivia section below — same card markup either way. The CTA is always
+  // a real button-like element (never plain status text) whose look/label/
+  // tooltip/clickability comes straight out of activityCtaMeta +
+  // activityClickPolicy — the same two functions openActivityModal itself
+  // uses to actually enforce what's allowed, so a card can never visually
+  // promise something a click wouldn't honor.
+  function activityCardHTML({ day, activity, tileState, weekLocked }, i) {
     const rot = [-2, 1.5, -1, 2, -1.5][i % 5];
-    const statusIcon = tileState === 'done'
-      ? `<span style="color:var(--success);">${Icons.check}</span>`
-      : tileState === 'locked' ? `<span style="width:16px;display:inline-block;color:var(--ink-soft);">${Icons.lock}</span>` : '';
-    const statusText = tileState === 'active' ? 'Play now →' : tileState === 'locked' ? 'Locked' : tileState === 'done' ? 'Completed' : "Time's up";
+    const policy = activityClickPolicy({ activity, tileState, weekLocked });
+    const cta = activityCtaMeta({ day, activity, tileState, weekLocked }, policy);
+    // Card-level state class: 'done' | 'locked' | 'active' | 'expired' —
+    // weekLocked folds any not-yet-done card into 'expired' visually, same
+    // as it does for tileState in js/state.js's activityTileState.
+    const cardStateClass = tileState === 'done' ? 'done' : weekLocked ? 'expired' : tileState;
     return `
-      <div class="sketch-card activity-card ${tileState === 'locked' ? 'locked' : 'interactive'} ${tileState}"
-           style="--hover-rot:${rot}deg;" data-activity="${activity.id}" data-locked="${tileState === 'locked'}">
+      <div class="sketch-card activity-card ${policy.open ? 'interactive' : 'locked'} ${cardStateClass}"
+           style="--hover-rot:${rot}deg;" data-activity="${activity.id}" title="${cta.tooltip}">
         <div class="activity-card__medal">${pillarIcon(day.pillarIcon)}</div>
         <div class="activity-card__day">${day.label} · ${day.theme}</div>
         <div class="activity-card__title">${activity.title}</div>
-        <div class="activity-card__status ${tileState === 'done' ? 'done' : tileState}">${statusIcon} ${statusText}</div>
+        <button type="button" class="doodle-btn sm activity-card__cta ${cta.cls}" aria-disabled="${!policy.open}" title="${cta.tooltip}">${cta.icon} ${cta.label}</button>
       </div>`;
   }
 
+  // Every card click routes through openActivityModal, full stop — it re-
+  // derives the same policy itself and is the actual enforcement point (see
+  // its own comment), so there's no separate locked-check to keep in sync
+  // here. A card whose button is styled disabled still receives the click
+  // and still gets a toast explaining why, same as before this pass.
   function wireActivityCardClicks(grid) {
     grid.querySelectorAll('.activity-card').forEach((card) => {
-      card.addEventListener('click', () => {
-        if (card.dataset.locked === 'true') {
-          Toast.show('🔒 Not unlocked yet — check back on the day!', 'error');
-          return;
-        }
-        openActivityModal(card.dataset.activity);
-      });
+      card.addEventListener('click', () => openActivityModal(card.dataset.activity));
     });
   }
 
@@ -537,10 +638,10 @@ const App = (() => {
     // card in the general list. Still one card per remaining remote
     // activity, ordered Monday→Friday; the grid reflows via CSS (auto-fit
     // — see .activity-grid) to whatever count that leaves.
-    const cards = days.flatMap(({ day, activityStates }) =>
+    const cards = days.flatMap(({ day, activityStates, weekLocked }) =>
       activityStates
         .filter(({ activity }) => !activity.id.startsWith('trivia'))
-        .map(({ activity, tileState }) => ({ day, activity, tileState })));
+        .map(({ activity, tileState }) => ({ day, activity, tileState, weekLocked })));
 
     grid.innerHTML = cards.map(activityCardHTML).join('');
     wireActivityCardClicks(grid);
@@ -556,9 +657,9 @@ const App = (() => {
     const days = AppState.computeDashboardDays(currentUser);
     const grid = document.getElementById('triviaGrid');
     if (!grid) return;
-    const cards = days.map(({ day, activityStates }) => {
+    const cards = days.map(({ day, activityStates, weekLocked }) => {
       const { activity, tileState } = activityStates.find(({ activity: a }) => a.id.startsWith('trivia'));
-      return { day, activity, tileState };
+      return { day, activity, tileState, weekLocked };
     });
     grid.innerHTML = cards.map(activityCardHTML).join('');
     wireActivityCardClicks(grid);
@@ -604,7 +705,22 @@ const App = (() => {
       cell.addEventListener('click', () => {
         const key = cell.dataset.activity;
         if (bingo[key]) { Toast.show('Already checked off — nice work!', 'success'); return; }
-        if (!isActivityUnlocked(key)) { Toast.show('🔒 Not unlocked yet — check back on the day!', 'error'); return; }
+        // 'trivia' is the single aggregate bingo square (checked off only
+        // once every daily triviaMon..triviaFri round is done — see
+        // js/store.js) — it isn't itself a real schedule activity id, so
+        // there's no single day to open here. Route to whichever day's
+        // round is currently playable instead of trying (and failing) to
+        // open "trivia" directly.
+        if (key === 'trivia') {
+          const days = AppState.computeDashboardDays(currentUser);
+          const openDay = days.find((d) => d.activityStates.some((s) => s.activity.id.startsWith('trivia') && s.tileState === 'active'));
+          if (openDay) {
+            openActivityModal(openDay.activityStates.find((s) => s.activity.id.startsWith('trivia')).activity.id);
+          } else {
+            Toast.show('🏁 Race Day Trivia — play from its own section above, one day at a time!', 'error');
+          }
+          return;
+        }
         openActivityModal(key);
       });
     });
@@ -683,6 +799,25 @@ const App = (() => {
     const fn = activityId.startsWith('trivia') ? Games.trivia : fnMap[activityId];
     if (!fn) return;
     const day = findActivityDay(activityId); // schedule is the single source of truth for the day/theme header
+    if (!day) return;
+    const activity = day.activities.find((a) => a.id === activityId);
+    if (!activity) return;
+
+    // The actual enforcement point (not just the card click handler above —
+    // see activityClickPolicy's own comment) for locked/expired/week-ended
+    // gating, so it can't be bypassed by any other entry point into this
+    // function (the Bingo Card's cells, a stray console call, etc.).
+    const todayStr = todayLocalDateString();
+    const weekLocked = isWeekLocked(todayStr);
+    const bingo = { ...Store.emptyBingo(), ...(currentUser.bingo || {}) };
+    const submitted = !!bingo[activityId];
+    const tileState = AppState.activityTileState(activity, submitted, day, todayStr, weekLocked);
+    const policy = activityClickPolicy({ activity, tileState, weekLocked });
+    if (!policy.open) {
+      Toast.show(activityBlockedToast(policy, day), 'error');
+      return;
+    }
+
     openModal((body) => {
       // Two ways an activity can hand control back:
       //  - done(): the usual case — submission is final, close the modal and
@@ -708,6 +843,17 @@ const App = (() => {
         // no unlock()/quit() exposed to them — see the note on modalLocked
         // above; done() (above) is the only way this ever unlocks again.
         lock: () => setModalLocked(true),
+        // Read by Photo Finish/Nomination (js/games.js) to decide what's
+        // still allowed inside the modal once it's open:
+        //  - weekLocked: the global end-of-week switch — true here only
+        //    when policy.mode === 'done' (every other case would already
+        //    have been blocked above), so it means "show this read-only,
+        //    no more voting/submitting," never "block opening at all."
+        //  - viewOnly: the Photo Finish/Nomination browse-only carve-out —
+        //    deadline passed, this user never submitted, but they can still
+        //    browse (and for Photo Finish, vote) during the active week.
+        weekLocked,
+        viewOnly: policy.mode === 'view',
       });
     });
   }
