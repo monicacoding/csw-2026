@@ -60,6 +60,13 @@ const Mascot = (() => {
       // mascot are simply ignored — they must not re-count or re-trigger.
       if (window.Minigame && Minigame.isOpen()) return;
 
+      // The secret mini-game becomes unplayable once Customer Service Week
+      // has ended (the global view-only lockout — see data/schedule.js's
+      // isWeekLocked), even for someone who's never found it yet: clicks
+      // simply stop building toward the reveal, silently, same as the
+      // "already open" guard above rather than a toast on every click.
+      if (window.isWeekLocked && isWeekLocked()) return;
+
       clicks += 1;
 
       const img = el.querySelector('img');
