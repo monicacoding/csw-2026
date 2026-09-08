@@ -4,16 +4,21 @@
 // own copy, so this file is the only place day/theme text needs to change.
 // Dates are local-time midnight; an activity unlocks at 00:00 on its date.
 //
-// Each day's `activities` array holds every activity happening that day, not
-// just the portal one — the timeline's hover popover (js/app.js) lists all
-// of them, tagged by `type`. By convention `activities[0]` is always the
-// portal/remote activity (the one with an `id`, tracked via bingo/hasSubmitted
-// and opened as a modal) — every other entry is purely informational (no
-// `id`, nothing to submit) and just needs `title` + `type`.
-//   type: 'remote' — lives in the app (the 5 portal activities)
-//   type: 'onsite' — happens in person, not tracked by the app at all
-// Add an activity to either list and it shows up in the popover for free —
-// nothing else to wire up.
+// Each day's `activities` array holds every activity happening that day —
+// the timeline's hover popover (js/app.js) and the activity board both
+// derive from it, so adding an activity here (remote or on-site) reflects
+// everywhere automatically, no separate list to maintain.
+//   type: 'remote' — lives in the app, opens as a modal, has a stable `id`
+//   type: 'onsite' — happens in person, not tracked by the app, no `id`
+//     (informational only — shown in the hover popover, not the board)
+// Race Day Trivia now runs every day (a new 5-question set each day — see
+// data/trivia-questions.js's TRIVIA_BY_DAY, keyed by this file's day `id`s),
+// so it appears on all five days alongside that day's other activity, if
+// any. Each day's trivia set has its own `id` (`triviaMon`, `triviaTue`,
+// etc.) so it locks/unlocks/tracks exactly like any other single-day
+// activity — see js/store.js's submitTriviaDay for how its score
+// accumulates across days while still using the single shared "trivia"
+// bingo square (only checked off once all 5 days are done).
 const CSW_SCHEDULE = [
   {
     id: 'mon',
@@ -21,11 +26,8 @@ const CSW_SCHEDULE = [
     date: '2026-10-05',
     theme: 'On Your Marks',
     pillarIcon: 'flag',
-    // Open the entire week, not just Monday — see isActivityUnlocked/
-    // computeDashboardDays, which special-case `openAllWeek`. `closesAfter`
-    // is the last day it's still considered "on time" (not yet "missed").
     activities: [
-      { id: 'nomination', title: 'Who Went The Extra Mile?', type: 'remote', openAllWeek: true, closesAfter: '2026-10-09' },
+      { id: 'triviaMon', title: 'Race Day Trivia', type: 'remote' },
     ],
   },
   {
@@ -35,6 +37,7 @@ const CSW_SCHEDULE = [
     theme: 'Picking Up The Pace',
     pillarIcon: 'bolt',
     activities: [
+      { id: 'triviaTue', title: 'Race Day Trivia', type: 'remote' },
       { id: 'hyperlinkRace', title: 'Hyperlink Race', type: 'remote' },
     ],
   },
@@ -45,6 +48,7 @@ const CSW_SCHEDULE = [
     theme: 'The Halfway Mile',
     pillarIcon: 'star',
     activities: [
+      { id: 'triviaWed', title: 'Race Day Trivia', type: 'remote' },
       { id: 'photoFinish', title: 'Photo Finish', type: 'remote' },
     ],
   },
@@ -55,6 +59,7 @@ const CSW_SCHEDULE = [
     theme: 'The Final Stretch',
     pillarIcon: 'sparkle',
     activities: [
+      { id: 'triviaThu', title: 'Race Day Trivia', type: 'remote' },
       { id: 'snapJudgement', title: 'Snap Judgement', type: 'remote' },
     ],
   },
@@ -65,7 +70,13 @@ const CSW_SCHEDULE = [
     theme: 'Crossing the Finish Line',
     pillarIcon: 'checkerbit',
     activities: [
-      { id: 'trivia', title: 'Race Day Trivia', type: 'remote' },
+      { id: 'triviaFri', title: 'Race Day Trivia', type: 'remote' },
+      // Moved here from Monday — day-gated to Friday like every other
+      // activity now, not open all week. (That's a judgment call, not
+      // an explicit instruction — flagged in the handoff notes; flip
+      // `openAllWeek: true` + `closesAfter: '2026-10-09'` back on here
+      // to restore the old open-all-week behavior if preferred.)
+      { id: 'nomination', title: 'Who Went The Extra Mile?', type: 'remote' },
       { title: 'Victory Lap Party', type: 'onsite' },
       { title: 'Cake', type: 'onsite' },
     ],
@@ -75,7 +86,12 @@ const CSW_SCHEDULE = [
 // The 6th bingo square — unlocks once the other 5 are complete.
 const BONUS_SQUARE = { id: 'bonus', title: 'Bonus: Full House' };
 
-// All five scored/tracked bingo keys, in card order.
+// The five *tracked activity types* (not five calendar days, and not five
+// per-day trivia sets) — one bingo square each. Race Day Trivia's square is
+// a single aggregate: js/store.js only checks it off once all 5 daily
+// trivia sets (triviaMon..triviaFri, tracked separately — see
+// Store.submitTriviaDay) are done, the same way this list always meant
+// "one square per activity type," not "one square per calendar day."
 const BINGO_KEYS = ['nomination', 'hyperlinkRace', 'photoFinish', 'snapJudgement', 'trivia'];
 
 // While we're previewing (mock data, no real calendar-gated audience yet),

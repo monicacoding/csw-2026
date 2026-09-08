@@ -43,6 +43,20 @@ const Games = (() => {
 
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
+  // Hyperlink Race and Snap Judgement specifically need a real desktop
+  // browser (Hyperlink Race opens a second tab to hunt through; Snap
+  // Judgement's crop-reveal + dropdown are tuned for a mouse) — block
+  // starting either one from a phone-class viewport rather than let it run
+  // in a degraded state. Race Day Trivia has no such requirement and isn't
+  // gated here.
+  function renderDesktopOnlyBlock(body, day, title) {
+    body.innerHTML = modalHeader(day, title) + `
+      <div style="text-align:center;">
+        <p style="font-size:40px;">💻</p>
+        <p style="color:var(--ink-soft);font-weight:700;">${escapeHtml(title)} needs a desktop or laptop browser to play — switch devices and come back to give it a go!</p>
+      </div>`;
+  }
+
   // User-submitted free text (nominee names, reasons, captions, product
   // guesses) gets rendered back into the page for everyone to read — escape
   // it so a colleague's "reason" can't smuggle in markup.
@@ -105,6 +119,10 @@ const Games = (() => {
       renderAlreadyCompleted(body, day, 'Hyperlink Race', "✅ You've already completed the Hyperlink Race!", 'hyperlinkRaceEntries');
       return;
     }
+    if (window.isMobileViewport && window.isMobileViewport()) {
+      renderDesktopOnlyBlock(body, day, 'Hyperlink Race');
+      return;
+    }
 
     body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
       <div style="text-align:center;">
@@ -133,6 +151,11 @@ const Games = (() => {
       timerInterval = setInterval(() => { timerEl.textContent = fmt(Date.now() - startTime); }, 200);
       body.querySelector('#hrStart').disabled = true;
       body.querySelector('#hrFound').disabled = false;
+      // Session has genuinely started — lock the modal against outside-
+      // click/✕ dismissal. No in-app way out from here except finishing
+      // (a browser refresh still works as an escape hatch, just not one
+      // this UI offers — see the comment on ctx.lock in app.js).
+      ctx.lock();
     });
 
     body.querySelector('#hrFound').addEventListener('click', () => {
@@ -191,6 +214,10 @@ const Games = (() => {
       renderAlreadyCompleted(body, day, 'Snap Judgement', "✅ You've already made your guesses!", 'snapJudgementEntries');
       return;
     }
+    if (window.isMobileViewport && window.isMobileViewport()) {
+      renderDesktopOnlyBlock(body, day, 'Snap Judgement');
+      return;
+    }
     renderSnapIntro(body, user, day, ctx);
   }
 
@@ -203,7 +230,10 @@ const Games = (() => {
         <p>🏁 <span><strong>Scoring</strong> blends three things: getting it right, revealing as little as possible before you guess, and how fast you clear all ${SNAP_ROUNDS.length} rounds.</span></p>
       </div>
       <button class="doodle-btn" id="sjStart" style="width:100%;">Start Guessing</button>`;
-    body.querySelector('#sjStart').addEventListener('click', () => runSnapRounds(body, user, day, ctx));
+    body.querySelector('#sjStart').addEventListener('click', () => {
+      ctx.lock(); // session starts now — no in-app way out until it's finished
+      runSnapRounds(body, user, day, ctx);
+    });
   }
 
   function snapUpdateRevealUI(body, level) {
@@ -335,36 +365,67 @@ const Games = (() => {
     renderRound();
   }
 
-  // ---------------- Race Day Trivia (Friday · Crossing the Finish Line) ----------------
+  // ---------------- Race Day Trivia (all week — 5 new questions daily) ----------------
+  // Runs Monday through Friday now, not just once on Friday: each day has
+  // its own 5-question set (data/trivia-questions.js — TRIVIA_BY_DAY, keyed
+  // by the schedule day id) and its own submission that locks after
+  // answering, exactly like every other single-day activity. Score
+  // accumulates across the days completed so far (Store.submitTriviaDay
+  // handles the cumulative bookkeeping + the per-day vs. aggregate bingo
+  // flags — see the comment there).
   const TQ_BASE_PER_CORRECT = 10;
   const TQ_MAX_SPEED_BONUS_PER_CORRECT = 10;
   const TQ_IDEAL_SECONDS_PER_QUESTION = 6; // par pace for full speed bonus
   const TQ_MAX_SECONDS_PER_QUESTION = 20; // pace at/beyond which the speed bonus is zero
+  const TRIVIA_DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri'];
+  const capitalize = (s) => s[0].toUpperCase() + s.slice(1);
+
+  // Count of daily trivia sets this user has completed so far — read
+  // straight off their existing bingo flags (triviaMon..triviaFri), no
+  // extra round-trip needed alongside the cumulative score already on
+  // `user.triviaTotalScore`.
+  function triviaDaysCompleted(user) {
+    const bingo = user?.bingo || {};
+    return TRIVIA_DAY_ORDER.filter((d) => bingo[`trivia${capitalize(d)}`]).length;
+  }
 
   async function trivia(body, user, day, ctx) {
-    const already = await Store.hasSubmitted('triviaEntries', user.code);
+    const dayId = day.id; // 'mon'..'fri' — which day's 5-question set this is
+    const already = await Store.hasSubmittedTriviaDay(user.code, dayId);
     if (already) {
-      renderAlreadyCompleted(body, day, 'Race Day Trivia', "✅ You've already completed the trivia!", 'triviaEntries');
+      const cumulative = user.triviaTotalScore || 0;
+      const daysCompleted = triviaDaysCompleted(user);
+      renderAlreadyCompleted(
+        body, day, 'Race Day Trivia',
+        `✅ You've already completed today's trivia! Cumulative score: ${cumulative} pts across ${daysCompleted} / ${TRIVIA_DAY_ORDER.length} days.`,
+        'triviaEntries',
+      );
       return;
     }
     renderTriviaIntro(body, user, day, ctx);
   }
 
   function renderTriviaIntro(body, user, day, ctx) {
-    const questions = TRIVIA_QUESTIONS;
+    const questions = TRIVIA_BY_DAY[day.id] || [];
+    const daysCompleted = triviaDaysCompleted(user);
     body.innerHTML = modalHeader(day, 'Race Day Trivia') + `
       <div class="game-explainer">
-        <p>🏁 <span><strong>Goal:</strong> answer ${questions.length} CSW trivia questions, one at a time.</span></p>
+        <p>🏁 <span><strong>Goal:</strong> answer today's ${questions.length} CSW trivia questions, one at a time.</span></p>
+        <p>📅 <span>Race Day Trivia runs <strong>all week</strong> — a new set unlocks each day, Monday through Friday, and your score adds up across every day you complete.</span></p>
         <p>✅ <span>You earn <strong>base points</strong> for every question you get right.</span></p>
-        <p>⏱️ <span><strong>Speed matters too</strong> — the clock starts when you begin and stops on your last answer. Clearing the whole round faster earns a bonus on top of your correct answers.</span></p>
-        <p>🎯 <span>Get it right first — a wrong answer earns no speed bonus either way, so don't rush past an answer you're not sure of.</span></p>
+        <p>⏱️ <span><strong>Speed matters too</strong> — the clock starts when you begin and stops on your last answer. Clearing today's round faster earns a bonus on top of your correct answers.</span></p>
       </div>
-      <button class="doodle-btn" id="tqStart" style="width:100%;">Start the Race</button>`;
-    body.querySelector('#tqStart').addEventListener('click', () => runTrivia(body, user, day, ctx));
+      ${daysCompleted > 0 ? `<p class="eyebrow-hand" style="text-align:center;">🏆 Cumulative score so far: <strong>${user.triviaTotalScore || 0} pts</strong> across ${daysCompleted} day${daysCompleted === 1 ? '' : 's'}.</p>` : ''}
+      <button class="doodle-btn" id="tqStart" style="width:100%;">Start Today's Race</button>`;
+    body.querySelector('#tqStart').addEventListener('click', () => {
+      ctx.lock(); // session starts now — no in-app way out until it's finished
+      runTrivia(body, user, day, ctx);
+    });
   }
 
   function runTrivia(body, user, day, ctx) {
-    const questions = TRIVIA_QUESTIONS;
+    const dayId = day.id;
+    const questions = TRIVIA_BY_DAY[dayId] || [];
     let idx = 0, correctCount = 0, locked = false;
     const startTime = Date.now();
 
@@ -374,9 +435,9 @@ const Games = (() => {
       const pct = Math.round((idx / questions.length) * 100);
       body.innerHTML = modalHeader(day, 'Race Day Trivia') + `
         <div style="text-align:center;">
-          <div style="font-family:var(--font-hand);font-size:15px;color:var(--ink-soft);margin-bottom:4px;">Question ${idx+1} of ${questions.length}</div>
+          <div style="font-family:var(--font-hand);font-size:15px;color:var(--ink-soft);margin-bottom:4px;">Question ${idx+1} of ${questions.length}${q.pillar ? ` · ${escapeHtml(q.pillar)}` : ''}</div>
           <div style="height:8px;background:var(--sage);border-radius:999px;overflow:hidden;margin-bottom:22px;"><div style="height:100%;background:var(--gold);width:${pct}%;transition:width .3s ease;"></div></div>
-          <div style="font-family:var(--font-display);font-size:20px;color:var(--navy);margin-bottom:20px;">${q.q}</div>
+          <div style="font-family:var(--font-display);font-size:20px;color:var(--navy);margin-bottom:20px;">${escapeHtml(q.q)}</div>
           <div id="tqChoices"></div>
         </div>`;
       const choicesEl = body.querySelector('#tqChoices');
@@ -403,7 +464,7 @@ const Games = (() => {
     }
 
     async function finish() {
-      // Aggregate pace across the whole round (not summed per-question
+      // Aggregate pace across today's round (not summed per-question
       // bonuses) — one speed factor from total completion time, paid out
       // proportionally across the questions actually answered correctly.
       const totalElapsedSec = (Date.now() - startTime) / 1000;
@@ -414,19 +475,25 @@ const Games = (() => {
       const basePoints = correctCount * TQ_BASE_PER_CORRECT;
       const speedBonus = Math.round(correctCount * TQ_MAX_SPEED_BONUS_PER_CORRECT * speedFactor);
       const score = basePoints + speedBonus;
+      // Predicted post-submit cumulative — `user` hasn't been refreshed yet
+      // at this point, so this is genuinely "current total + what you just
+      // earned," not a stale read.
+      const cumulativeAfter = (user.triviaTotalScore || 0) + score;
+      const daysCompletedAfter = triviaDaysCompleted(user) + 1;
 
       body.innerHTML = modalHeader(day, 'Race Day Trivia') + `
         <div style="text-align:center;">
           <p style="font-size:40px;">🏁</p>
           <div style="font-family:var(--font-display);font-size:44px;color:var(--brick);margin:6px 0;">${score} pts</div>
-          <p style="color:var(--ink-soft);">${correctCount} / ${questions.length} correct</p>
+          <p style="color:var(--ink-soft);">${correctCount} / ${questions.length} correct today</p>
           <p class="eyebrow-hand">${basePoints} for correctness + ${speedBonus} speed bonus</p>
+          <p class="eyebrow-hand" style="margin-top:10px;">🏆 Cumulative Race Day Trivia score: <strong>${cumulativeAfter} pts</strong> across ${daysCompletedAfter} / ${TRIVIA_DAY_ORDER.length} days.</p>
           <button class="doodle-btn" id="tqFinish" style="margin-top:10px;">Submit &amp; Continue</button>
         </div>`;
       body.querySelector('#tqFinish').addEventListener('click', async (e) => {
         e.target.disabled = true; e.target.textContent = 'Submitting…';
-        await Store.submitEntry({
-          collection: 'triviaEntries', code: user.code, bingoKey: 'trivia',
+        await Store.submitTriviaDay({
+          code: user.code, dayId,
           scoreDelta: score, data: { score, correctCount, totalQuestions: questions.length, basePoints, speedBonus },
         });
         ctx.done();
@@ -542,7 +609,7 @@ const Games = (() => {
     }
   }
 
-  // ---------------- Nomination (Monday · On Your Marks — open all week) ----------------
+  // ---------------- Nomination (Friday · Crossing the Finish Line) ----------------
   const NOMINATION_EMOJIS = ['🏆', '⭐', '🔥', '🎉', '👏', '🥇', '🚀', '💪', '🙌', '🎯', '🏅', '✨'];
 
   async function nomination(body, user, day, ctx) {
@@ -557,7 +624,7 @@ const Games = (() => {
   function renderNominationForm(body, user, day, ctx) {
     body.innerHTML = modalHeader(day, 'Who Went The Extra Mile?') + `
       <div style="text-align:center;">
-        <p style="color:var(--ink-soft);">Give a shout-out to a colleague who went above and beyond this week. Open all week — submit any day.</p>
+        <p style="color:var(--ink-soft);">Give a shout-out to a colleague who went above and beyond this week.</p>
         <div class="field" style="text-align:left;"><label>Colleague's first &amp; last name</label><input id="nomName" type="text" placeholder="e.g. Jane Doe" /></div>
         <div class="field" style="text-align:left;">
           <label>Pick an emoji for your shout-out</label>

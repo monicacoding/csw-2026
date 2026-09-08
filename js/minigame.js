@@ -5,6 +5,19 @@
 // and, once found, unlocks the secret leaderboard view (App.openSecretLeaderboard).
 // ---------------------------------------------------------------------------
 
+// Shared mobile/touch-device check — a bare global (not inside the Minigame
+// IIFE below) since js/games.js also uses it for the desktop-only gate on
+// Hyperlink Race/Snap Judgement, and this file loads first. "Mobile" means
+// both narrow *and* touch-primary, not just one or the other — a narrow
+// desktop browser window isn't a phone, and a large touch-screen laptop
+// isn't either.
+function isMobileViewport() {
+  const touchPrimary = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  const narrow = window.innerWidth < 768;
+  return touchPrimary && narrow;
+}
+window.isMobileViewport = isMobileViewport;
+
 const Minigame = (() => {
   const LANE_COUNT = 3;
   const COIN_VALUE = 10;
@@ -91,10 +104,13 @@ const Minigame = (() => {
     }
 
     function showIntro() {
+      const controlsHTML = isMobileViewport()
+        ? '<span><strong>Controls:</strong> swipe left / right anywhere on the game area to switch lanes.</span>'
+        : '<span><strong>Controls:</strong> tap ← → (or A / D) to switch lanes.</span>';
       content.innerHTML = `
         <h2 class="sketch-title" style="font-size:24px;">Mile Dash</h2>
         <div class="mg-explainer">
-          <p>🎮 <span><strong>Controls:</strong> tap ← → (or A / D) to switch lanes.</span></p>
+          <p>🎮 ${controlsHTML}</p>
           <p>${COIN_GLYPH} <span><strong>Coins</strong> are worth ${COIN_VALUE} points each — grab every one you can reach.</span></p>
           <p>${OBSTACLE_GLYPH} <span><strong>Obstacles</strong> cost you a life on contact — steer clear of them.</span></p>
           <p>${LIFE_GLYPH} <span>You start with <strong>${STARTING_LIVES} lives</strong> — the run ends the moment you lose them all.</span></p>
@@ -147,6 +163,22 @@ const Minigame = (() => {
         if (e.key === 'ArrowRight' || e.key === 'd') playerLane = Math.min(LANE_COUNT - 1, playerLane + 1);
       }
       window.addEventListener('keydown', keyHandler);
+
+      // Touch equivalent of the arrow keys — swipe left/right anywhere on
+      // the canvas to shift a lane, same one-lane-per-gesture step as a
+      // single key press (not a drag-to-position control).
+      const SWIPE_THRESHOLD_PX = 30;
+      let touchStartX = null;
+      function touchStartHandler(e) { touchStartX = e.touches[0].clientX; }
+      function touchEndHandler(e) {
+        if (touchStartX === null) return;
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        touchStartX = null;
+        if (dx > SWIPE_THRESHOLD_PX) playerLane = Math.min(LANE_COUNT - 1, playerLane + 1);
+        else if (dx < -SWIPE_THRESHOLD_PX) playerLane = Math.max(0, playerLane - 1);
+      }
+      canvas.addEventListener('touchstart', touchStartHandler, { passive: true });
+      canvas.addEventListener('touchend', touchEndHandler, { passive: true });
 
       function spawn() {
         const lane = Math.floor(Math.random() * LANE_COUNT);
@@ -220,6 +252,8 @@ const Minigame = (() => {
       async function endGame(elapsedSeconds) {
         running = false;
         window.removeEventListener('keydown', keyHandler);
+        canvas.removeEventListener('touchstart', touchStartHandler);
+        canvas.removeEventListener('touchend', touchEndHandler);
 
         // Survival format: every run ends at 0 lives by definition, so a
         // lives-based multiplier no longer means anything — coins collected

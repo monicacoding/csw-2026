@@ -45,9 +45,23 @@
       <!-- Race track strip — the anchor of the page -->
       <div class="track-wrap">
         <div class="track-hint">👆 Hover a day for the full schedule</div>
+        <!-- Mobile-only equivalent of .track-hint above — hidden on desktop/
+             tablet via CSS, shown instead of it below 640px (see
+             sketch.css's mobile media query). -->
+        <div class="track-scroll-hint">👉 Swipe to see all 5 days · Tap a day for details</div>
         <div class="track-road" id="trackRoad"></div>
         <div class="track-markers" id="trackMarkers"></div>
       </div>
+
+      <!-- Race Day Trivia runs all week (a new 5-question set unlocks each
+           day, scored cumulatively) — its own section, parallel to This
+           Week's Activities below, rather than a repeated daily card in
+           the general list. -->
+      <section class="board-section trivia-section">
+        <h2 class="sketch-title activities-title">Race Day Trivia — 5 Days, 5 Rounds</h2>
+        <p class="trivia-section__blurb">A new 5-question round unlocks every day, Monday through Friday — answer each day's set once, and your score adds up across every day you complete.</p>
+        <div class="activity-grid" id="triviaGrid"></div>
+      </section>
 
       <!-- Activities board — flows directly from the track, nothing in between -->
       <section class="board-section">
@@ -70,7 +84,11 @@
   <script src="data/schedule.js"></script>
   <script src="data/trivia-questions.js"></script>
   <script src="data/ms-products.js"></script>
-  <script src="js/mock-db.js"></script>
+  <!-- The only two module scripts in the app — see the comment at the top
+       of firebase-config.js for why that's safe alongside every other
+       script here staying a classic, non-module <script>. -->
+  <script type="module" src="js/firebase-config.js"></script>
+  <script type="module" src="js/firestore-db.js"></script>
   <script src="js/store.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/state.js"></script>

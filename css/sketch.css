@@ -7,7 +7,6 @@
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0;
-  min-width: 1180px;
   min-height: 100vh;
   background: var(--cream);
   color: var(--ink);
@@ -340,6 +339,15 @@ a { color: inherit; text-decoration: none; cursor: none; }
   opacity: 0.8;
   pointer-events: none;
 }
+/* Mobile equivalent of .track-hint (swipe/tap instead of hover) — hidden by
+   default, shown instead of .track-hint below 640px. See sketch.css's
+   mobile media query and index.html. */
+.track-scroll-hint { display: none; }
+/* Created dynamically (js/app.js's ensureMobileDayCard) and only ever
+   populated from the mobile-gated tap handler, but hidden by default here
+   too regardless — defensive, in case a window gets resized from mobile
+   to desktop mid-session while it's showing. */
+.mobile-day-card { display: none; }
 .track-road {
   position: relative;
   height: 5px;
@@ -531,9 +539,21 @@ a { color: inherit; text-decoration: none; cursor: none; }
 =========================================================================== */
 .board-section { margin-bottom: 46px; }
 .activities-title { display: block; margin-bottom: 26px; }
+/* Race Day Trivia's own section reuses .board-section/.activities-title as-
+   is (same title styling, same grid) — the only addition is this one
+   explanatory line under the heading. */
+.trivia-section__blurb {
+  font-family: var(--font-hand); font-size: 17px; color: var(--ink-soft);
+  margin: -14px 0 22px; max-width: 640px;
+}
 .activity-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* auto-fit rather than a fixed column count: most days now carry two
+     activities instead of one (Race Day Trivia plus that day's other
+     activity — see data/schedule.js), so the board can be anywhere from 5
+     to 9 cards depending on the week, and this reflows correctly for any
+     of those counts at any viewport width without per-count overrides. */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 22px;
 }
 
@@ -860,4 +880,151 @@ a { color: inherit; text-decoration: none; cursor: none; }
   display: flex; justify-content: space-between;
   font-family: var(--font-hand); font-size: 13px; color: var(--ink-soft);
   margin: 2px 2px 0;
+}
+
+/* ===========================================================================
+   Responsive — tablet and mobile
+   Everything above this point was written desktop-first (fixed px values
+   throughout); these breakpoints retrofit it downward rather than
+   rewriting the whole file mobile-first. Two tiers:
+     - <=900px  (tablet / small laptop): trims outer spacing and oversized
+       type so nothing feels like a shrunk desktop layout.
+     - <=640px  (phone): the real layout changes — stacked login, wrapping
+       timeline, single-column grids, edge-to-edge modals. Verified live at
+       375×812 (iPhone-class) and 768×1024 (tablet) widths, not just by
+       reading the rules.
+=========================================================================== */
+@media (max-width: 900px) {
+  .canvas-main { padding: 88px 24px 60px; }
+  .hub-hero .doodle-tag { font-size: 20px; }
+  .sketch-title.hub-hero__title { font-size: 28px; }
+  .track-wrap { padding: 46px 20px 40px; }
+  .track-hint { display: none; } /* the hover popover itself is desktop-only below 640px anyway — see .track-marker-popover */
+  .lb-tabs { grid-template-columns: repeat(2, 1fr); }
+  .sketch-modal { max-width: 92vw; padding: 26px; }
+}
+
+@media (max-width: 640px) {
+  html, body { cursor: auto; } /* the custom cursor trail is a mouse-hover flourish — irrelevant (and untestable) on touch */
+  button, input, textarea, select, a, .doodle-btn, .activity-card, .bingo-cell, .emoji-option {
+    cursor: pointer; /* restore real touch/pointer affordance now the desktop custom cursor is off */
+  }
+
+  .canvas-main { padding: 84px 14px 48px; }
+  .hub-hero { margin-bottom: 32px; gap: 8px; }
+  .hub-hero .doodle-tag { font-size: 16px; }
+  .sketch-title.hub-hero__title { font-size: 22px; }
+  .activities-title { margin-bottom: 16px; font-size: 22px; }
+
+  /* Fixed corner widgets: still fixed, just tucked in tighter so a small
+     viewport doesn't feel like it's losing real content space to them. */
+  .player-badge { top: 12px; right: 12px; }
+  .preview-strip { top: 58px; right: 12px; max-width: 170px; font-size: 10px; }
+  .utility-dock { bottom: 14px; left: 14px; }
+  .utility-dock .doodle-btn.sm { padding: 8px 12px; font-size: 11px; }
+  .track-mascot, #trackMascot.eggable { bottom: 14px; right: 14px; width: 72px; height: 72px; }
+  .track-mascot .speech { font-size: 13px; padding: 5px 10px; max-width: 46vw; white-space: normal; }
+
+  /* Timeline: a horizontally-scrolling strip instead of either squeezing 5
+     markers into one fixed-width row (cramped) or wrapping them into a
+     centered flow (reads as one clump, not five spaced-out days). Each
+     marker gets real, fixed breathing room via min-width, and the whole
+     row scrolls — a proper doodle-tag hint (below) signals it's scrollable. */
+  .track-wrap { padding: 20px 0 44px; }
+  .track-hint { display: none; } /* replaced by .track-scroll-hint below, sized for mobile */
+  .track-scroll-hint { display: block; }
+  .track-road { display: none; }
+  .track-markers {
+    flex-wrap: nowrap; justify-content: flex-start;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    /* CSS quirk worth flagging: setting overflow-x alone forces overflow-y
+       to compute as 'auto' too (the spec doesn't allow one axis 'visible'
+       and the other not) — so .track-marker-label below, an absolutely-
+       positioned child sitting well below the marker circle itself, was
+       getting vertically clipped by that auto-promoted overflow-y even
+       though only horizontal scrolling was ever intended. Giving the
+       strip enough height to contain a marker + its label avoids ever
+       triggering that vertical clipping in the first place. */
+    min-height: 92px;
+    scroll-snap-type: x proximity;
+    gap: 0;
+    margin: 0;
+    padding: 0 28px;
+  }
+  .track-marker {
+    /* Generous horizontal margin — .track-marker-label below (e.g.
+       "Wednesday") is wider than the 38px circle itself and would overlap
+       a neighboring label at anything tighter, now that markers no longer
+       need to all fit on-screen at once (the strip scrolls). */
+    top: 0; flex: 0 0 auto;
+    margin: 0 34px;
+    scroll-snap-align: center;
+  }
+  .track-scroll-hint {
+    text-align: center; font-family: var(--font-hand); font-size: 13px;
+    color: var(--ink-soft); opacity: 0.8; margin: 0 0 4px;
+  }
+  /* The desktop hover popover is retired on mobile entirely (not just
+     hidden-but-still-there) — :hover never fires on touch, and nesting it
+     inside this now-horizontally-scrolling strip would clip it regardless
+     (see the .mobile-day-card comment in js/app.js). Its tap-to-reveal
+     replacement is the fixed-position .mobile-day-card below, completely
+     decoupled from this container. */
+  .track-marker-popover { display: none; }
+
+  /* Fixed-position mobile "tap a day" card — see showMobileDayCard in
+     js/app.js. Reuses the .track-marker-popover__* content classes above
+     (day/theme/item rows) for free; only the outer container differs. */
+  .mobile-day-card {
+    display: none;
+    position: fixed;
+    left: 16px; right: 16px; bottom: 16px;
+    z-index: 200;
+    text-align: center;
+    background: var(--white);
+    border: 2.5px solid var(--navy);
+    border-radius: 20px 24px 18px 24px / 24px 18px 24px 20px;
+    padding: var(--space-4);
+    filter: drop-shadow(3px 5px 0 rgba(29,53,87,0.2));
+  }
+  .mobile-day-card.show { display: block; animation: modalPop 0.2s ease; }
+  .mobile-day-card__close {
+    position: absolute; top: 10px; right: 10px;
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--cream-dark); border: 2px solid var(--navy);
+    font-size: 12px; color: var(--navy);
+  }
+
+  .activity-grid { grid-template-columns: 1fr; gap: 14px; }
+  .activity-card { min-height: 0; padding: 18px 16px; }
+
+  .bingo-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; max-width: none; }
+  .bingo-cell { aspect-ratio: auto; padding: 14px; }
+
+  .modal-backdrop { padding: 0; align-items: flex-end; }
+  .sketch-modal {
+    max-width: 100vw; width: 100%; max-height: 94vh;
+    padding: 22px 16px 26px;
+    border-radius: 26px 26px 0 0 / 22px 22px 0 0;
+  }
+  .modal-close { top: 12px; right: 12px; }
+
+  #loginScreen { flex-direction: column; gap: 18px; padding: 24px 16px; overflow-y: auto; }
+  .mascot-block img { width: 110px; }
+  .mascot-block .speech { font-size: 15px; padding: 8px 14px; }
+  .login-card { width: 100%; max-width: 380px; padding: 26px 20px; }
+  .login-title { font-size: 30px; }
+
+  .lb-tabs { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .lb-champion { flex-direction: column; gap: 10px; text-align: center; }
+  .lb-champion__info { text-align: center; }
+  .lb-row { grid-template-columns: 40px 1fr auto; padding: 10px 12px; gap: 4px; }
+
+  .emoji-picker { grid-template-columns: repeat(4, 1fr); }
+  #recognitionWall, #pfGallery { grid-template-columns: 1fr !important; }
+
+  .finish-card { padding: 26px 18px; }
+  .finish-card img { width: 150px; }
+  .finish-card h1 { font-size: 28px; }
 }

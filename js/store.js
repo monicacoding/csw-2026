@@ -1,24 +1,43 @@
 // ---------------------------------------------------------------------------
 // Data access layer. Every read/write for the app goes through here.
-// Currently backed by MockDB (js/mock-db.js) — see the note there for how
-// to swap this back to real Firestore later without touching callers.
+// Backed by real Firestore (js/firestore-db.js) as of the Firebase swap —
+// previously js/mock-db.js (still in the repo, unused). Every db-layer call
+// below is awaited: FirestoreDB's methods are genuinely async (real network
+// requests), unlike MockDB's synchronous localStorage reads, which is the
+// one thing that had to change here — the function *shapes* (Store.*, what
+// the rest of the app calls) never did.
 //
 // Collections:
 //   users/{CODE}
 //   hyperlinkRaceEntries/{CODE}
 //   snapJudgementEntries/{CODE}
-//   triviaEntries/{CODE}
+//   triviaEntries/{CODE}/days/{DAY_ID}   subcollection — see submitTriviaDay
 //   photoFinishEntries/{CODE}            + votes/{VOTER_CODE} subcollection
 //   nominations/{CODE}
 //   minigameEntries/{CODE}
 // ---------------------------------------------------------------------------
 
 const Store = (() => {
+  // Race Day Trivia's 5 daily sets, keyed to match data/schedule.js's day
+  // ids and TRIVIA_BY_DAY's keys 1:1.
+  const TRIVIA_DAY_IDS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+  const triviaDayBingoKey = (dayId) => `trivia${dayId[0].toUpperCase()}${dayId.slice(1)}`;
+
   function emptyBingo() {
     return {
       hyperlinkRace: false,
       snapJudgement: false,
+      // `trivia` is the single square BINGO_KEYS/the Bingo Card track — see
+      // submitTriviaDay below, it only flips true once every triviaX flag
+      // has. The 5 triviaX flags are the *real* per-day submission state
+      // (day-gating, "already completed" checks) but aren't themselves in
+      // BINGO_KEYS, so they don't change what "5 core squares" means.
       trivia: false,
+      triviaMon: false,
+      triviaTue: false,
+      triviaWed: false,
+      triviaThu: false,
+      triviaFri: false,
       photoFinish: false,
       nomination: false,
       bonus: false,
@@ -26,27 +45,27 @@ const Store = (() => {
   }
 
   async function getOrCreateUser(code) {
-    const existing = MockDB.getDoc('users', code);
+    const existing = await FirestoreDB.getDoc('users', code);
     if (existing) {
-      MockDB.setDoc('users', code, { lastSeenAt: MockDB.now() }, true);
-      return { id: code, ...existing, lastSeenAt: MockDB.now() };
+      await FirestoreDB.setDoc('users', code, { lastSeenAt: FirestoreDB.now() }, true);
+      return { id: code, ...existing, lastSeenAt: FirestoreDB.now() };
     }
     const fresh = {
       code,
-      createdAt: MockDB.now(),
-      lastSeenAt: MockDB.now(),
+      createdAt: FirestoreDB.now(),
+      lastSeenAt: FirestoreDB.now(),
       bingo: emptyBingo(),
       totalScore: 0,
       finishLineSeenAt: null,
       easterEgg: { found: false, foundAt: null, minigameHighScore: 0 },
       cursorGlyph: '🏎️',
     };
-    MockDB.setDoc('users', code, fresh, false);
+    await FirestoreDB.setDoc('users', code, fresh, false);
     return { id: code, ...fresh };
   }
 
   async function getUser(code) {
-    const data = MockDB.getDoc('users', code);
+    const data = await FirestoreDB.getDoc('users', code);
     return data ? { id: code, ...data } : null;
   }
 
@@ -57,8 +76,8 @@ const Store = (() => {
   async function createUser(code, pinHash, pinDigitHashes) {
     const fresh = {
       code,
-      createdAt: MockDB.now(),
-      lastSeenAt: MockDB.now(),
+      createdAt: FirestoreDB.now(),
+      lastSeenAt: FirestoreDB.now(),
       bingo: emptyBingo(),
       totalScore: 0,
       finishLineSeenAt: null,
@@ -69,20 +88,20 @@ const Store = (() => {
       pinResetAttempts: 0,
       pinResetLockedUntil: null,
     };
-    MockDB.setDoc('users', code, fresh, false);
+    await FirestoreDB.setDoc('users', code, fresh, false);
     return { id: code, ...fresh };
   }
 
   // Adopts a PIN for a record that doesn't have one yet (e.g. a user created
   // before PINs existed) — sets it, does not compare against anything.
   async function setPin(code, pinHash, pinDigitHashes) {
-    MockDB.setDoc('users', code, { pinHash, pinDigitHashes }, true);
+    await FirestoreDB.setDoc('users', code, { pinHash, pinDigitHashes }, true);
   }
 
   // A successful "forgot your PIN" reset: sets the new PIN and clears any
   // failed-attempt tracking.
   async function resetPin(code, pinHash, pinDigitHashes) {
-    MockDB.setDoc('users', code, {
+    await FirestoreDB.setDoc('users', code, {
       pinHash, pinDigitHashes,
       pinResetAttempts: 0,
       pinResetLockedUntil: null,
@@ -93,42 +112,93 @@ const Store = (() => {
   // reset attempts for `lockoutMs` once `maxAttempts` is reached. Returns
   // the updated attempt count and whether this guess triggered the lock.
   async function registerFailedPinReset(code, { maxAttempts, lockoutMs }) {
-    const user = MockDB.getDoc('users', code) || {};
+    const user = (await FirestoreDB.getDoc('users', code)) || {};
     const attempts = (user.pinResetAttempts || 0) + 1;
-    const patch = { pinResetAttempts: attempts, pinResetLastAttempt: MockDB.now() };
+    const patch = { pinResetAttempts: attempts, pinResetLastAttempt: FirestoreDB.now() };
     const locked = attempts >= maxAttempts;
     if (locked) patch.pinResetLockedUntil = new Date(Date.now() + lockoutMs).toISOString();
-    MockDB.setDoc('users', code, patch, true);
+    await FirestoreDB.setDoc('users', code, patch, true);
     return { attempts, locked };
   }
 
   async function touchLastSeen(code) {
-    MockDB.setDoc('users', code, { lastSeenAt: MockDB.now() }, true);
+    await FirestoreDB.setDoc('users', code, { lastSeenAt: FirestoreDB.now() }, true);
   }
 
-  // Writes a game entry + flips the matching bingo flag + bumps totalScore,
-  // mirroring the batched write we'd do against Firestore.
+  // Writes a game entry + flips the matching bingo flag + bumps totalScore.
   async function submitEntry({ collection, code, data, bingoKey, scoreDelta = 0 }) {
-    MockDB.setDoc(collection, code, { code, submittedAt: MockDB.now(), ...data }, false);
+    await FirestoreDB.setDoc(collection, code, { code, submittedAt: FirestoreDB.now(), ...data }, false);
 
-    const user = MockDB.getDoc('users', code) || { bingo: emptyBingo(), totalScore: 0 };
+    const user = (await FirestoreDB.getDoc('users', code)) || { bingo: emptyBingo(), totalScore: 0 };
     const bingo = { ...emptyBingo(), ...(user.bingo || {}) };
     bingo[bingoKey] = true;
 
     const coreDone = BINGO_KEYS.every((k) => bingo[k]);
     if (coreDone) bingo.bonus = true;
 
-    MockDB.incrementField('users', code, 'totalScore', scoreDelta, { bingo, lastSeenAt: MockDB.now() });
+    await FirestoreDB.incrementField('users', code, 'totalScore', scoreDelta, { bingo, lastSeenAt: FirestoreDB.now() });
 
     return { coreDone };
   }
 
   async function hasSubmitted(collection, code) {
-    return !!MockDB.getDoc(collection, code);
+    return !!(await FirestoreDB.getDoc(collection, code));
+  }
+
+  // ---- Race Day Trivia: daily + cumulative -------------------------------
+  // Each day's 5-question set is its own submission, stored as a real
+  // Firestore subcollection doc (triviaEntries/{code}/days/{dayId}) rather
+  // than one flat triviaEntries/{code} doc, since a user now has up to 5
+  // separate trivia entries, not one. (firestore.rules has a matching
+  // nested `match /days/{dayId}` rule for this — see that file.)
+  //
+  // Gates exactly like any other single-day activity via its own bingo flag
+  // (`triviaMon` etc.) — but that flag is deliberately *not* one of
+  // BINGO_KEYS. The one BINGO_KEYS actually tracks, `trivia`, only flips
+  // true once every day's flag has, i.e. once the whole week's trivia is
+  // done — same "one square per activity type" meaning this list always had.
+  //
+  // Score is cumulative: `triviaTotalScore` on the user doc is the running
+  // sum across every day completed so far (this pass's contribution goes
+  // through the normal totalScore increment too, same as every other
+  // activity — Race Day Trivia was never special-cased out of the combined
+  // score, only the secret mini-game is, see recordMinigameScore below).
+  async function submitTriviaDay({ code, dayId, data, scoreDelta = 0 }) {
+    const daysCollection = FirestoreDB.subPath('triviaEntries', code, 'days');
+    await FirestoreDB.setDoc(daysCollection, dayId, { code, dayId, submittedAt: FirestoreDB.now(), ...data }, false);
+
+    const user = (await FirestoreDB.getDoc('users', code)) || { bingo: emptyBingo(), totalScore: 0, triviaTotalScore: 0 };
+    const bingo = { ...emptyBingo(), ...(user.bingo || {}) };
+    bingo[triviaDayBingoKey(dayId)] = true;
+
+    const allDaysDone = TRIVIA_DAY_IDS.every((d) => bingo[triviaDayBingoKey(d)]);
+    if (allDaysDone) bingo.trivia = true;
+
+    const coreDone = BINGO_KEYS.every((k) => bingo[k]);
+    if (coreDone) bingo.bonus = true;
+
+    const triviaTotalScore = (user.triviaTotalScore || 0) + scoreDelta;
+    await FirestoreDB.incrementField('users', code, 'totalScore', scoreDelta, {
+      bingo, triviaTotalScore, lastSeenAt: FirestoreDB.now(),
+    });
+
+    return { coreDone, allDaysDone, triviaTotalScore };
+  }
+
+  async function hasSubmittedTriviaDay(code, dayId) {
+    const daysCollection = FirestoreDB.subPath('triviaEntries', code, 'days');
+    return !!(await FirestoreDB.getDoc(daysCollection, dayId));
+  }
+
+  // Every trivia day this user has completed so far — used to show "days
+  // completed" alongside the cumulative score.
+  async function getTriviaDaysCompleted(code) {
+    const daysCollection = FirestoreDB.subPath('triviaEntries', code, 'days');
+    return FirestoreDB.listCollection(daysCollection);
   }
 
   async function getLeaderboard(collection, { orderBy, direction = 'desc', limit = 50 }) {
-    let rows = MockDB.listCollection(collection);
+    let rows = await FirestoreDB.listCollection(collection);
     rows.sort((a, b) => {
       const av = a[orderBy] ?? 0, bv = b[orderBy] ?? 0;
       if (av < bv) return direction === 'asc' ? -1 : 1;
@@ -143,7 +213,7 @@ const Store = (() => {
   }
 
   async function getPhotoFinishEntries() {
-    const rows = MockDB.listCollection('photoFinishEntries');
+    const rows = await FirestoreDB.listCollection('photoFinishEntries');
     rows.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
     return rows;
   }
@@ -151,7 +221,7 @@ const Store = (() => {
   // Every "Who Went The Extra Mile?" nomination, newest first — powers the
   // Recognition Wall (only shown to users who've submitted their own).
   async function getNominations() {
-    const rows = MockDB.listCollection('nominations');
+    const rows = await FirestoreDB.listCollection('nominations');
     rows.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
     return rows;
   }
@@ -159,37 +229,45 @@ const Store = (() => {
   // One vote per user, enforced per-entry via the votes/{voterCode} doc.
   async function voteForPhoto(entryCode, voterCode) {
     if (entryCode === voterCode) throw new Error("You can't vote for your own entry.");
-    const votesCollection = MockDB.subPath('photoFinishEntries', entryCode, 'votes');
-    if (MockDB.getDoc(votesCollection, voterCode)) {
+    const votesCollection = FirestoreDB.subPath('photoFinishEntries', entryCode, 'votes');
+    if (await FirestoreDB.getDoc(votesCollection, voterCode)) {
       throw new Error('Already voted for this entry.');
     }
-    MockDB.setDoc(votesCollection, voterCode, { votedAt: MockDB.now() }, false);
-    MockDB.incrementField('photoFinishEntries', entryCode, 'votes', 1);
+    await FirestoreDB.setDoc(votesCollection, voterCode, { votedAt: FirestoreDB.now() }, false);
+    await FirestoreDB.incrementField('photoFinishEntries', entryCode, 'votes', 1);
   }
 
+  // Deliberately never touches `totalScore` — the secret mini-game's score
+  // counts only toward its own secret leaderboard (Store.getLeaderboard
+  // with collection 'minigameEntries'), not the Combined Overall board or
+  // any per-user overall total. Finding the easter egg is a bonus, not a
+  // requirement, so someone who never finds it shouldn't be scored against
+  // someone who did. `FirestoreDB.setDoc` here — not `incrementField` — is
+  // what keeps this true: the only field ever written on the user doc for
+  // this is `easterEgg`, never `totalScore`.
   async function recordMinigameScore(code, score) {
-    MockDB.setDoc('minigameEntries', code, { code, score, playedAt: MockDB.now() }, false);
-    const user = MockDB.getDoc('users', code);
+    await FirestoreDB.setDoc('minigameEntries', code, { code, score, playedAt: FirestoreDB.now() }, false);
+    const user = await FirestoreDB.getDoc('users', code);
     const prevHigh = user?.easterEgg?.minigameHighScore || 0;
-    MockDB.setDoc('users', code, {
-      easterEgg: { found: true, foundAt: MockDB.now(), minigameHighScore: Math.max(prevHigh, score) },
+    await FirestoreDB.setDoc('users', code, {
+      easterEgg: { found: true, foundAt: FirestoreDB.now(), minigameHighScore: Math.max(prevHigh, score) },
     }, true);
   }
 
   async function markEasterEggFound(code) {
-    const user = MockDB.getDoc('users', code);
+    const user = await FirestoreDB.getDoc('users', code);
     const prevHigh = user?.easterEgg?.minigameHighScore || 0;
-    MockDB.setDoc('users', code, {
-      easterEgg: { found: true, foundAt: MockDB.now(), minigameHighScore: prevHigh },
+    await FirestoreDB.setDoc('users', code, {
+      easterEgg: { found: true, foundAt: FirestoreDB.now(), minigameHighScore: prevHigh },
     }, true);
   }
 
   async function markFinishLineSeen(code) {
-    MockDB.setDoc('users', code, { finishLineSeenAt: MockDB.now() }, true);
+    await FirestoreDB.setDoc('users', code, { finishLineSeenAt: FirestoreDB.now() }, true);
   }
 
   async function setCursorGlyph(code, glyph) {
-    MockDB.setDoc('users', code, { cursorGlyph: glyph }, true);
+    await FirestoreDB.setDoc('users', code, { cursorGlyph: glyph }, true);
   }
 
   return {
@@ -202,6 +280,9 @@ const Store = (() => {
     touchLastSeen,
     submitEntry,
     hasSubmitted,
+    submitTriviaDay,
+    hasSubmittedTriviaDay,
+    getTriviaDaysCompleted,
     getLeaderboard,
     getCombinedLeaderboard,
     getPhotoFinishEntries,

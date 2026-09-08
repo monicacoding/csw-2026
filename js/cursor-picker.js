@@ -71,11 +71,12 @@ const CursorPicker = (() => {
     if (panel) panel.style.display = 'none';
   }
 
-  function toggle() {
+  async function toggle() {
     ensurePanel();
     if (panel.style.display === 'flex') { close(); return; }
     const code = Auth.getCurrentCode();
-    open((code && MockDB.getDoc('users', code)?.cursorGlyph) || '🏎️');
+    const user = code ? await FirestoreDB.getDoc('users', code) : null;
+    open(user?.cursorGlyph || '🏎️');
   }
 
   return { toggle, open, close };

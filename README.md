@@ -1,6 +1,6 @@
 # Extra Mile Hub — Customer Service Week 2026
 
-A single-page, hand-drawn/gamified activities hub for the "We Go the Extra Mile" campaign. Static site — plain HTML/CSS/JS, no framework, no bundler. Currently running on **mock data** (see "Mock data" below) while we iterate on look and feel — no Firebase project needed yet, and this build is a visual/functional preview ahead of that swap, not the final persistence layer.
+A single-page, hand-drawn/gamified activities hub for the "We Go the Extra Mile" campaign. Static site — plain HTML/CSS/JS, no framework, no bundler. Backed by real Firestore as of the Firebase swap (see "Firebase backend" below) — previously ran on browser-local mock data while the look and feel was still being iterated on.
 
 ## Run locally
 
@@ -18,7 +18,7 @@ No compile step. `npm run build` isn't required to run the site locally or in de
 2. In Vercel, **Add New… → Project → Import** the repo.
 3. Leave every setting on its default and click **Deploy**. Vercel detects the `package.json`, runs `npm install` (installs nothing — zero dependencies) then the build command from `vercel.json` (`npm run build` — validates asset references and JS syntax, doesn't move or transform any files), and serves the repo root as static output per `vercel.json`'s `outputDirectory` — which is exactly the site, unchanged. Nothing to fill in, nothing to override.
 
-**Environment variables:** none. The app is 100% client-side and reads/writes only `localStorage` — there's no API key, backend URL, or secret of any kind for this build to configure. That will change once the Firebase swap happens (see "Mock data" below); for now, leaving Vercel's environment variables screen empty is correct, not incomplete.
+**Environment variables:** still none, even after the Firebase swap. The Firebase web config in `js/firebase-config.js` is hardcoded directly in that file rather than injected via env vars — see the comment there for why that's the right call (it's not a secret; Vercel env vars would just be a slower, extra-indirection way to end up with the exact same values in the client bundle either way). Leave Vercel's environment variables screen empty.
 
 **`vercel.json`** — this one's here because the zero-config assumption in an earlier pass turned out to be wrong in practice, not just theory: once `package.json` has a `build` script, Vercel runs it through `@vercel/static-build`, which needs an explicit output directory rather than defaulting to the repo root — without one, the deploy built "successfully" but had nothing to serve, which is exactly the 404 that surfaced after the first real deploy. `vercel.json` now pins both settings explicitly:
 ```json
@@ -33,13 +33,22 @@ No compile step. `npm run build` isn't required to run the site locally or in de
 
 **If you still get a 404 after adding `vercel.json` and redeploying:** that's a different cause than the one above, and I can't see your Vercel dashboard or GitHub repo to diagnose it directly — check, in this order: (1) the Vercel deploy's **Build Logs** actually show `npm run build` succeeding, not erroring silently; (2) the GitHub repo you connected actually contains every file in this project (`index.html`, `css/`, `js/`, `data/`, `assets/`, `package.json`, `vercel.json`) — a partial push is the other common cause of this exact error; (3) you're opening the deployment's real production/preview URL from the Vercel dashboard, not a stale or mistyped one.
 
-## Mock data
+## Firebase backend
 
-Everything (users, submissions, votes, scores) lives in the browser's `localStorage` via `js/mock-db.js`, behind the same `Store.*` interface (`js/store.js`) a real Firestore backend will eventually sit behind — swapping that in later shouldn't require touching any caller. Practical implications of that for this preview build, right now:
+Everything (users, submissions, votes, scores) lives in real Firestore now, via `js/firestore-db.js`, behind the exact same `Store.*` interface (`js/store.js`) the old mock layer sat behind — no caller (`js/games.js`, `js/app.js`, etc.) needed to change shape, only the db-layer calls inside `js/store.js` itself gained `await` (Firestore reads/writes are genuine network calls; the old `localStorage`-backed mock ones weren't).
 
-- **State is per-browser, not shared.** Two people (or two devices) looking at this Vercel URL are looking at two independent, unsynced copies of the data — there's no real multiplayer/shared leaderboard yet, even though the UI presents one.
-- **State does not survive a hard reset of that browser's storage** (private/incognito windows, "clear site data," a different browser). That's expected and fine for a preview build — it's not data loss, there was never a shared source of truth to lose.
-- **This is not a regression from local dev to production** — there's no bundler-specific or SSR-specific behavior anywhere in this codebase that could diverge between the two (confirmed by `build.js`, which validates the exact same files that get served either way). Verified directly: a completely fresh session (cleared `localStorage`, hard-reloaded, same static-file-serving setup Vercel uses) still shows a clean login screen, not a blank page or a thrown error.
+**Project**: `csw-2026` (config in `js/firebase-config.js` — see the comment there for why those values are fine to have in the client bundle, not secret). **Collections**: `users`, `hyperlinkRaceEntries`, `snapJudgementEntries`, `triviaEntries` (+ a `days` subcollection per user — Race Day Trivia's daily entries), `photoFinishEntries` (+ a `votes` subcollection per entry), `nominations`, `minigameEntries`. Security rules live in `firestore.rules` — intentionally open (document-ID-shape checks only, no real auth), matching this project's stated low-friction/non-secure posture; deploy with `firebase deploy --only firestore:rules` or paste the file into Firebase Console → Firestore → Rules.
+
+**✅ Verified live against the real project.** The Firestore database was created (Console → Build → Firestore Database → Create database, Production mode, Native mode) and `firestore.rules` deployed, then the whole flow was exercised end-to-end against `csw-2026` for real — not just code review:
+- Login/account creation: `Store.getOrCreateUser` writes a real `users/{code}` doc (PIN hash, cursor glyph, bingo map, easter-egg state, etc.), confirmed via a direct read of the same doc.
+- Race Day Trivia: played a full round through the actual UI, submitted, and confirmed `triviaEntries/{code}/days/{dayId}` was created with the right score breakdown — this is also what caught a real bug (see below) before it could bite a real user.
+- Cumulative scoring: confirmed the parent `users/{code}` doc's `totalScore`, `triviaTotalScore`, and `bingo.triviaMon` all updated correctly off the back of that one trivia submission.
+
+Along the way, one real bug was caught and fixed: `firestore.rules` only had a `match` block for `triviaEntries/{code}` as a flat document, not for its `days/{dayId}` subcollection (added when Race Day Trivia became daily/cumulative in Polish pass #17) — a `match` on a parent doc doesn't implicitly cover a subcollection, so every trivia submission would have failed with permission-denied until a nested `match /days/{dayId} {...}` block was added. Re-deploy `firestore.rules` if you're setting this project up fresh, so that fix is included.
+
+**Local mock mode still exists, just unwired** — `js/mock-db.js` is untouched and still in the repo (not loaded by `index.html` anymore) in case a `localStorage`-only mode is ever useful again (e.g. an offline demo); swap `index.html`'s script tags back to restore it. Its old caveats (state is per-browser, doesn't survive a storage wipe) no longer apply now that Firestore is live — data is genuinely shared and persistent once the step above is done.
+
+**The old "Reset" button is gone.** It used to wipe the *entire* mock database for quick testing — safe against a throwaway `localStorage` blob, but it would now be a real, destructive, everyone's-data button against a shared project, so it wasn't carried over rather than risk it getting clicked for real. The preview strip's day-jump controls and "Real" (clear the date override) are unaffected; logging out still works via the player badge's own ✕.
 
 ## Architecture: one continuous page
 
@@ -52,8 +61,12 @@ css/
   sketch.css                 the hand-drawn visual system — cards, buttons, track,
                               ambient background, cursor trail, all animations
 js/
-  mock-db.js                 localStorage-backed mock data store
-  store.js                   the stable data interface (see below) — talks to MockDB
+  firebase-config.js         Firebase project config + SDK init (ES module — see there)
+  firestore-db.js             the real Firestore data layer (ES module) — same interface
+                              mock-db.js had, so store.js's shape never had to change
+  mock-db.js                 the old localStorage-backed mock store — unused, kept for
+                              reference/rollback (index.html no longer loads it)
+  store.js                   the stable data interface (see below) — talks to FirestoreDB
   auth.js                    4-letter code session handling
   state.js                   derives dashboard/bingo view-state from a user record
   icons.js                   hand-drawn/sketch-style SVG icons
@@ -66,20 +79,15 @@ js/
                               leaderboard, secret leaderboard, finish-line overlay
 data/
   schedule.js                 Mon–Fri unlock schedule + the "jump to day" preview override
-  trivia-questions.js         placeholder question bank — swap in the real one
+  trivia-questions.js         the real daily question bank (TRIVIA_BY_DAY)
 assets/mascot/                the mascot artwork (kept exactly as generated — do not touch)
-firestore.rules               kept for later — see "Swapping back to Firestore" below
+firestore.rules               deploy this to the csw-2026 Firebase project — see "Firebase
+                              backend" above
 ```
 
-## Backend: mock data layer (swap-in-ready)
+## Backend: Firestore (real, not mock)
 
-`js/store.js` is the **only** thing the UI talks to (`Store.getOrCreateUser`, `Store.submitEntry`, `Store.getLeaderboard`, etc.) — it's the same interface a real Firestore-backed version had. Right now its internals call `js/mock-db.js`, a small localStorage-backed object store, instead of Firestore. No Firebase SDK is loaded at all currently.
-
-**To swap back to real Firestore later:**
-1. Add the Firebase SDK script tags + a `js/firebase-config.js` (see `firestore.rules` for the security rules to pair with it — unchanged from before).
-2. Rewrite the bodies of the functions in `store.js` to call `db.collection(...)` again. Every caller (`app.js`, `games.js`, `minigame.js`) stays untouched since they only ever call `Store.*`.
-
-Until then, all data lives in the browser's `localStorage` under `csw2026_mockdb_v2`, and there's a **Reset** button in the preview strip (top-right) that clears it.
+`js/store.js` is the **only** thing the UI talks to (`Store.getOrCreateUser`, `Store.submitEntry`, `Store.getLeaderboard`, etc.) — the exact same interface it always had. Its internals now call `js/firestore-db.js`, a real Firestore adapter, instead of the old localStorage-backed `js/mock-db.js` (still in the repo, just unwired — see "Firebase backend" above for why). Verified live end-to-end against the real project — see "Firebase backend" above.
 
 ## Visual system
 
@@ -302,3 +310,73 @@ Added what was missing for a real deploy: `package.json` (zero dependencies, `bu
 Originally shipped without a `vercel.json`, reasoning that Vercel's zero-config default output directory for an unrecognized framework would just be the repo root. That reasoning was wrong: adding a `build` script to `package.json` makes Vercel run the build through `@vercel/static-build`, which needs an explicit output directory rather than defaulting to root — the first real deploy built without error but had nothing to serve, i.e. exactly the 404 that surfaced. Fixed by adding `vercel.json` with `buildCommand`/`outputDirectory` pinned explicitly (`outputDirectory: "."`, the repo root — see "Deploy to Vercel" up top for the full explanation). Lesson for next time: verify a Vercel-specific claim like this against an actual deploy, not just local reasoning about local behavior — the two aren't guaranteed to match once a build step is genuinely involved.
 
 Full local-run instructions, Vercel deploy steps, environment-variable note, and the mock-data-in-production caveat live in "Run locally" / "Deploy to Vercel" / "Mock data" near the top of this file.
+
+## Polish pass #17 — daily cumulative trivia, schedule restructure, mobile responsiveness
+
+The biggest structural pass so far — four changes, two of them (trivia format, activity scheduling) touching the data model, not just presentation.
+
+### 1. Secret mini-game score excluded from Combined Overall — already true, now documented
+
+Checked `Store.recordMinigameScore`: it only ever writes `minigameEntries` and the user's `easterEgg` field, never `totalScore` — the combined leaderboard and every per-user overall total were already unaffected by mini-game play. Nothing was broken; added an explicit comment on that function and verified live anyway (a 9999-point mini-game score left a user's Combined Overall total completely unchanged, while the secret leaderboard picked it up correctly) so this invariant is asserted, not just assumed.
+
+### 2. Race Day Trivia: daily, cumulative, and gated per day
+
+Replaced the single Friday-only quiz with 5 new questions unlocking each day Monday–Friday (the real questions provided, in `data/trivia-questions.js` — `TRIVIA_BY_DAY`, keyed by day id so a day's set can be swapped wholesale). Each day is its own submission that locks after answering, same pattern as every other single-day activity — implemented via `Store.submitTriviaDay`, which stores each day's entry as a Firestore-shaped subcollection doc (`triviaEntries/{code}/days/{dayId}`) rather than one flat doc, since a user now has up to 5 trivia entries, not one.
+
+**Scoring accumulates across days**, both the real per-user total (`totalScore`, incremented the same way every other activity already does) and a dedicated `triviaTotalScore` field used to power the "Race Day Trivia" leaderboard tab (which now reads cumulative totals off `users` instead of the now-multi-doc `triviaEntries` collection directly — see `renderLeaderboard` in `app.js`). Cumulative score-so-far shows on the pre-game screen (once you've done at least one prior day), the results screen after each submission, and the "already completed today" revisit screen.
+
+**The Bingo Card itself didn't need to change.** Rather than expanding `BINGO_KEYS` from 5 to 9 (one per activity-type plus one per trivia day), the 5 daily flags (`triviaMon`..`triviaFri`) track real per-day submission state but live outside `BINGO_KEYS`; the one flag `BINGO_KEYS` actually tracks (`trivia`) only flips true once all 5 day-flags are — preserving "one bingo square per activity type," so the Bingo Card's grid, styling, and "complete all 5" copy are all completely unchanged. Verified the whole chain live: per-day lock (Tuesday's trivia showed Completed while Tuesday's Hyperlink Race stayed independently playable), the `trivia` square staying unchecked at 1/5 days and flipping true at 5/5, and the leaderboard tab showing one correct cumulative row per user rather than 5.
+
+### 3. Schedule restructure: Who Went The Extra Mile → Friday, Trivia → all week
+
+`data/schedule.js`'s `activities` array per day now commonly holds two remote activities (that day's Race Day Trivia set plus its other activity) — Monday has just Trivia (since the nomination moved out), Friday has Trivia + the nomination + the two on-site items. Day themes stayed put; only which activities sit under each day changed, per the request.
+
+**Judgment call, flagged as asked:** built the nomination as Friday-only/day-gated (dropped its `openAllWeek`/`closesAfter` override) rather than keeping it open all week, per the instruction to build it that way pending feedback. Flip `openAllWeek: true, closesAfter: '2026-10-09'` back onto its schedule entry to restore the old open-all-week behavior if that's preferred instead.
+
+The activity board (`renderActivityBoard`) now flattens each day's activities into one card per activity rather than one per day, and `.activity-grid` switched from a fixed 5-column layout to `repeat(auto-fit, minmax(200px, 1fr))` so it reflows correctly for any count (5–9 depending on the day mix) at any width, with each day's card(s) still adjacent in reading order. The timeline hover popover needed **no changes at all** — it already iterated `day.activities` in full from an earlier pass, so it started listing both activities per day automatically the moment the schedule data changed. Verified live: Tuesday shows both Race Day Trivia and Hyperlink Race as separate cards and separate popover rows; Friday shows all four (Trivia, nomination, Victory Lap Party, Cake).
+
+### 4. Mobile responsiveness
+
+Removed the `min-width: 1180px` on `html, body` — this alone was blocking every phone-width layout regardless of anything else, so nothing downstream mattered until it was gone. Added two breakpoints (`@media (max-width: 900px)` for tablet, `@media (max-width: 640px)` for phone) retrofitting the existing desktop-first CSS: stacked login screen, a wrapping (not overflowing) timeline with the connecting road hidden below 640px, single-column activity/Gallery/Recognition-Wall grids, a bottom-sheet-style modal, 2-column Bingo Card and leaderboard tabs, and tightened-in fixed corner widgets. Swapped the custom `cursor: none` trail for the OS pointer below 640px, since it's a mouse-hover flourish with no touch equivalent.
+
+**Photo Finish upload was checked specifically, per the request** — `<input type="file" accept="image/*">` already had no `capture` attribute, which is what makes mobile Safari/Chrome offer *both* camera and gallery in the native picker sheet (adding `capture` would have narrowed it to camera-only, the wrong call here) — confirmed via the input's own attributes, not just visually. Ran the full upload pipeline at a 375px viewport with an injected file (same technique used for this flow in earlier passes, since the sandbox can't drive a native OS picker): themed button → preview → caption gating → submit → Gallery, all working, all legible, all correctly sized for tapping.
+
+Also audited and verified live at 375×812: login/PIN entry, the full timeline + activity board, a trivia question screen, the Bingo Card, and the Leaderboard (including its tab grid and champion card). One known minor item, left as-is rather than over-engineered: the `#previewStrip` day-jump widget (a mock-data testing aid, not part of the real user-facing app) visually overlaps the header at narrow widths — cosmetic only, on a dev-only tool.
+
+## Polish pass #18 — anti-cheating locks, desktop/mobile gating, mini-game touch, timeline overhaul
+
+### Secret Leaderboard tab — emoji dropped
+
+`SECRET_BOARD`'s label lost its 🤫, matching every other tab (`Combined Overall`, `Hyperlink Race`, etc.), which were already plain text. The standalone secret-leaderboard *view* (`App.openSecretLeaderboard`, reached from the mini-game's own end screen — a different surface from the Leaderboard modal's tabs) keeps its own 🤫 in its heading; only the tab label was in scope here.
+
+### Race Day Trivia gets its own weekly section
+
+New "Race Day Trivia — 5 Days, 5 Rounds" section, parallel to "This Week's Activities" (same `.board-section`/`.activities-title`/`.activity-grid` classes, one added blurb line), populated from a new `renderTriviaSection()` in `app.js`. `renderActivityBoard()` now filters trivia out of the general list (`!activity.id.startsWith('trivia')`) so it's not shown twice. Both sections share one `activityCardHTML()`/`wireActivityCardClicks()` pair rather than duplicating the card-rendering logic. Uses the exact same `AppState.computeDashboardDays` day-gating as everywhere else — no separate lock/active/completed logic to maintain. Verified live: trivia fully gone from the main grid, its own section showing all 5 days' correct states, the main grid correctly down to just each day's *other* activity.
+
+### Mid-session modal lock (Hyperlink Race, Snap Judgement, Race Day Trivia)
+
+`app.js`'s generic modal gained a `modalLocked` flag: once true, both the backdrop-click and the ✕ stop dismissing it (the ✕ hides outright rather than sitting there inert). `ctx` (passed to every activity) gained `lock()`/`unlock()`/`quit()`; the three cheating-risk activities call `ctx.lock()` the instant a real session starts (Hyperlink Race's Start, Snap Judgement's/Trivia's Start-through-first-round), and each shows its own "Quit" button once locked — a `confirm()`-gated escape hatch (deliberately higher-friction than the outside-click it replaces, and quitting submits nothing, so the activity is simply replayable from scratch after). `openModal()` always resets the lock on a fresh open, so Bingo/Leaderboard/every other modal is completely unaffected — verified Photo Finish stays freely dismissible throughout. Verified live end-to-end for all three: ✕ disappears and a real backdrop click does nothing once Start is clicked, Quit closes and leaves the activity re-openable from a clean slate.
+
+### Desktop-only gate for Hyperlink Race and Snap Judgement
+
+New shared `isMobileViewport()` (in `minigame.js`, since it loads first and both it and `games.js` need it) — true only when the viewport is *both* narrow (<768px) and touch-primary (`(hover: none) and (pointer: coarse)`), so a narrow desktop window or a large touch laptop don't false-positive either way. Both activities check it right after their "already submitted" check and, if true, show a clear "needs a desktop or laptop browser" message instead of the game — not locked (nothing's started), so it's freely dismissible. Race Day Trivia has no such gate. Verified: blocked with the right copy on a 375px/touch-emulated viewport, loads completely normally at desktop width.
+
+### Secret mini-game: swipe controls + adaptive explainer
+
+Added `touchstart`/`touchend` handlers to the mini-game's canvas — a swipe past a 30px threshold shifts one lane, the direct touch equivalent of one arrow-key press (not a drag-to-position control), cleaned up alongside the existing `keydown` removal on game over. The pre-game explainer now shows "swipe left / right" or "tap ← →" based on `isMobileViewport()`. Verified live: a swipe gesture (via dispatched `Touch`/`TouchEvent`, since the sandbox can't drive real hardware touch) visibly moved the car from the center lane to the right lane.
+
+### Timeline overhaul on mobile
+
+Replaced the previous "wrap into a centered clump" mobile layout with a horizontally-scrolling strip — generously-spaced markers (`scroll-snap-type: x proximity`), a new mobile-only hint ("👉 Swipe to see all 5 days · Tap a day for details") replacing the desktop hover hint. Hit a real CSS spec gotcha along the way, caught by actually looking at the rendered page rather than trusting the rules: setting `overflow-x: auto` silently forces `overflow-y` to compute as `auto` too (the spec doesn't allow one axis `visible` and the other not), which was clipping the day labels sitting below each marker — fixed with a `min-height` on the scroll strip sized to contain a marker plus its label, so nothing ever overflows vertically in the first place.
+
+**Tap-to-reveal replaces hover on mobile** (desktop's hover behavior is completely untouched). First attempt reused the existing hover-popover markup toggled via a `.tap-open` class — but that ran into the *same* overflow-clipping issue, this time for the popover itself (positioned via `bottom: 100%`, i.e. extending upward out of the now-`overflow-y:auto` scroll strip, silently clipped no matter how it was padded). Rather than patch around it, switched to a cleaner pattern: a `position: fixed` card (`#mobileDayCard`, `js/app.js`'s `showMobileDayCard`) appended to `<body>`, completely decoupled from the scrolling container — same content (`dayDetailInnerHTML`, factored out and shared with the desktop popover so there's exactly one place that builds it), docked to the bottom of the viewport, dismissed by its own ✕, a second tap elsewhere, or tapping another day. Verified live: tapping Friday's marker shows all 4 of its activities (2 remote, 2 on-site) correctly tagged in the fixed card; the close button and outside-tap both dismiss it correctly.
+
+**Also discovered, unrelated to the above:** this project directory contains a nested `csw-2026/csw-2026/` folder with its own `.git` — a separate git clone, presumably created for the GitHub/Vercel connection from the previous deploy pass. All of this pass's edits were made in the outer project directory (the one this dev server serves from); that nested clone is a different, currently-stale copy and will need these changes pushed/synced into it separately before they reach the live Vercel deployment.
+
+## Polish pass #19 — no in-modal Quit, for real
+
+Adjustment to pass #18's mid-session lock: removed the "Quit" button entirely from Hyperlink Race, Snap Judgement, and Race Day Trivia. Once one of these actually starts, there is now no in-app control that exits it — not outside-click (already true), not the ✕ (already true), and now not a Quit button either. The only way out is finishing and submitting.
+
+Removed `quitButtonHTML`/`wireQuitButton` from `js/games.js` entirely (they had no other callers) and `ctx.quit`/`ctx.unlock` from `app.js`'s `openActivityModal` (also unused elsewhere — `closeModal()` already resets the lock directly on the one path that still needs it, `ctx.done()`). `ctx.lock()` is the only capability these three activities get now.
+
+**Confirmed this doesn't strand anyone**, per the request: `modalLocked` is a plain in-memory JS variable, never written to `localStorage`/the mock store — there's nothing for a page refresh to "clean up" because nothing about the lock is ever persisted in the first place. Verified live: started Hyperlink Race, locked it, confirmed a real backdrop click does nothing (✕ hidden, no Quit button anywhere) — then hard-refreshed the page and landed cleanly back on the hub with no stuck state, and reopened Hyperlink Race to confirm it starts completely fresh (nothing was submitted, so nothing carried over). Same lock-with-no-exit behavior confirmed for Snap Judgement and Race Day Trivia. Photo Finish and the nomination remain untouched — still freely dismissible, as before.

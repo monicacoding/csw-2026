@@ -311,16 +311,25 @@ const App = (() => {
   }
 
   // ---------------- Hub ----------------
+  // Deliberately stays synchronous, unlike most of this file's other
+  // handlers — against MockDB, re-fetching the user doc here to grab a
+  // fresh cursorGlyph was free (a synchronous localStorage read), but
+  // against real Firestore that's a genuine network round-trip, and it's
+  // not worth blocking the *entire* hub render (badge, track, activity
+  // board, all of it) on a fetch whose only payoff is a cosmetic cursor
+  // glyph. Trusting currentUser.cursorGlyph directly can very briefly lag
+  // one interaction behind a change made via the cursor picker (which
+  // fetches its own fresh copy every time it opens — see
+  // CursorPicker.toggle), but that's a fine trade for not stalling the
+  // whole hub on it.
   function showHub() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appRoot').style.display = 'block';
-    // Read the persisted glyph fresh rather than trusting currentUser, which
-    // may not have been refreshed since the player last changed it via the
-    // cursor picker (that writes straight to the store, not to currentUser).
-    Cursor.setGlyph(MockDB.getDoc('users', currentUser.code)?.cursorGlyph || '🏎️');
+    Cursor.setGlyph(currentUser.cursorGlyph || '🏎️');
     renderPlayerBadge();
     renderPreviewStrip();
     renderTrack();
+    renderTriviaSection();
     renderActivityBoard();
     maybeShowFinishLine();
   }
@@ -368,11 +377,18 @@ const App = (() => {
     const dayBtns = CSW_SCHEDULE.map((d) =>
       `<button data-date="${d.date}" class="${d.date === currentOverride ? 'is-active' : ''}">${d.label.slice(0,3)}</button>`
     ).join('');
+    // No "Reset" button anymore — it used to call MockDB.reset(), wiping
+    // the entire local mock database for quick testing. That was safe
+    // against a throwaway localStorage blob; against this real, shared
+    // Firestore project it would be a genuinely destructive "wipe
+    // everyone's data" button, so it was dropped rather than carried over
+    // (see js/firestore-db.js). "Real" here still just clears the day
+    // override, and the player badge's own ✕ still logs out — between the
+    // two, nothing non-destructive Reset did is actually missing.
     strip.innerHTML = `
       <span>🔧 PREVIEW —</span>
       ${dayBtns}
       <button data-date="">Real</button>
-      <button id="resetPreviewData">Reset</button>
     `;
     strip.querySelectorAll('button[data-date]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -381,25 +397,16 @@ const App = (() => {
         showHub();
       });
     });
-    strip.querySelector('#resetPreviewData').addEventListener('click', () => {
-      MockDB.reset();
-      localStorage.removeItem('csw2026_preview_date');
-      Auth.logOut();
-      currentUser = null;
-      document.getElementById('playerBadge')?.remove();
-      document.getElementById('previewStrip')?.remove();
-      showLogin();
-    });
   }
 
-  // Builds the hover-popover markup for one timeline day, straight from
-  // `d.day.activities` — every activity that day, not just the tracked
-  // portal one. Nothing here is a separately-maintained list: add an
-  // activity (remote or on-site) to CSW_SCHEDULE and it shows up here
-  // automatically. This is schedule information only — deliberately no
-  // per-user completion status (Completed/Missed/etc.); that lives on the
-  // activity cards below, not here.
-  function dayPopoverHTML(d) {
+  // Shared content for both the desktop hover popover and the mobile tap
+  // card below — every activity that day (from `d.day.activities`, not
+  // just the tracked portal one). Nothing here is a separately-maintained
+  // list: add an activity (remote or on-site) to CSW_SCHEDULE and it shows
+  // up automatically, in both places. Schedule information only —
+  // deliberately no per-user completion status (Completed/Missed/etc.);
+  // that lives on the activity cards below, not here.
+  function dayDetailInnerHTML(d) {
     const itemsHTML = d.day.activities.map((a) => {
       const typeClass = a.type === 'onsite' ? 'onsite' : 'remote';
       const typeLabel = a.type === 'onsite' ? 'On-Site' : 'Remote';
@@ -410,12 +417,43 @@ const App = (() => {
                 </div>
               </div>`;
     }).join('');
+    return `<div class="track-marker-popover__day">${d.day.label} · ${formatShortDate(d.day.date)}</div>
+            <div class="track-marker-popover__theme">${d.day.theme}</div>
+            ${itemsHTML}`;
+  }
 
-    return `<div class="track-marker-popover">
-              <div class="track-marker-popover__day">${d.day.label} · ${formatShortDate(d.day.date)}</div>
-              <div class="track-marker-popover__theme">${d.day.theme}</div>
-              ${itemsHTML}
-            </div>`;
+  function dayPopoverHTML(d) {
+    return `<div class="track-marker-popover">${dayDetailInnerHTML(d)}</div>`;
+  }
+
+  // Mobile equivalent of the hover popover: a fixed-position card, not
+  // nested inside the horizontally-scrolling timeline strip at all. That's
+  // deliberate, not just a style choice — .track-markers needs
+  // overflow-x:auto for the horizontal scroll, and per the CSS spec that
+  // forces overflow-y to compute as 'auto' too, which would silently clip
+  // any absolutely-positioned popover anchored to a marker (discovered
+  // live: the popover simply never appeared, clipped by the very
+  // container it was trying to escape via `bottom: 100%`). A fixed card
+  // appended to <body> sidesteps that entirely.
+  let mobileDayCardEl = null;
+  function ensureMobileDayCard() {
+    if (mobileDayCardEl) return mobileDayCardEl;
+    mobileDayCardEl = document.createElement('div');
+    mobileDayCardEl.className = 'mobile-day-card';
+    mobileDayCardEl.id = 'mobileDayCard';
+    document.body.appendChild(mobileDayCardEl);
+    document.addEventListener('click', (e) => {
+      if (!mobileDayCardEl.classList.contains('show')) return;
+      if (mobileDayCardEl.contains(e.target) || e.target.closest('.track-marker')) return;
+      mobileDayCardEl.classList.remove('show');
+    });
+    return mobileDayCardEl;
+  }
+  function showMobileDayCard(d) {
+    const card = ensureMobileDayCard();
+    card.innerHTML = `<button type="button" class="mobile-day-card__close" aria-label="Close">✕</button>${dayDetailInnerHTML(d)}`;
+    card.querySelector('.mobile-day-card__close').addEventListener('click', () => card.classList.remove('show'));
+    card.classList.add('show');
   }
 
   function renderTrack() {
@@ -426,18 +464,34 @@ const App = (() => {
     markers.innerHTML = days.map((d) => {
       const cls = d.tileState === 'done' ? 'past' : d.tileState === 'active' ? 'active' : d.tileState === 'missed' ? 'missed' : '';
       const glyph = d.tileState === 'done' ? '✓' : d.tileState === 'missed' ? '✕' : d.day.label[0];
-      return `<div class="track-marker ${cls}" tabindex="0" aria-label="${d.day.label}: ${d.day.theme} — ${d.activity.title}">
+      const activityNames = d.activityStates.map((s) => s.activity.title).join(', ');
+      return `<div class="track-marker ${cls}" tabindex="0" aria-label="${d.day.label}: ${d.day.theme} — ${activityNames}">
                 <div class="track-marker-label">${d.day.label}<span class="track-marker-date">${formatShortDate(d.day.date)}</span></div>
                 ${glyph}
                 ${dayPopoverHTML(d)}
               </div>`;
     }).join('');
+    // Tap-to-reveal on mobile (no :hover to rely on) — desktop keeps its
+    // existing hover behavior untouched (dayPopoverHTML/.track-marker-popover
+    // above, shown purely via CSS :hover, same as before this pass).
+    if (window.isMobileViewport && window.isMobileViewport()) {
+      [...markers.children].forEach((markerEl, i) => {
+        markerEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          showMobileDayCard(days[i]);
+        });
+      });
+    }
 
     // The mascot is pinned to the corner (see .track-mascot in sketch.css) —
     // only its pose/speech reflect progress now, not a horizontal position.
+    // "Progress" is the 5 activity-type bingo squares (BINGO_KEYS), not
+    // calendar days — Race Day Trivia's square doesn't check off until all
+    // 5 of its daily sets are done, same as before this pass.
+    const totalSquares = BINGO_KEYS.length;
     const mascotEl = document.getElementById('trackMascot');
-    const state = completed === 0 ? 'greet' : completed >= 5 ? 'celebrate' : 'running';
-    const speechText = completed === 0 ? "Let's get rolling!" : completed >= 5 ? 'Full house — amazing!' : `${completed} down, ${5 - completed} to go!`;
+    const state = completed === 0 ? 'greet' : completed >= totalSquares ? 'celebrate' : 'running';
+    const speechText = completed === 0 ? "Let's get rolling!" : completed >= totalSquares ? 'Full house — amazing!' : `${completed} down, ${totalSquares - completed} to go!`;
     mascotEl.innerHTML = `
       <div class="speech">${speechText}</div>
       <div class="mascot-bob"><img src="${Mascot.src(state)}" alt="Mascot" /></div>
@@ -445,25 +499,25 @@ const App = (() => {
     Mascot.attachEasterEgg(mascotEl);
   }
 
-  function renderActivityBoard() {
-    const days = AppState.computeDashboardDays(currentUser);
-    const grid = document.getElementById('activityGrid');
-    grid.innerHTML = days.map(({ day, activity, tileState }, i) => {
-      const rot = [-2, 1.5, -1, 2, -1.5][i % 5];
-      const statusIcon = tileState === 'done'
-        ? `<span style="color:var(--success);">${Icons.check}</span>`
-        : tileState === 'locked' ? `<span style="width:16px;display:inline-block;color:var(--ink-soft);">${Icons.lock}</span>` : '';
-      const statusText = tileState === 'active' ? 'Play now →' : tileState === 'locked' ? 'Locked' : tileState === 'done' ? 'Completed' : "Time's up";
-      return `
-        <div class="sketch-card activity-card ${tileState === 'locked' ? 'locked' : 'interactive'} ${tileState}"
-             style="--hover-rot:${rot}deg;" data-activity="${activity.id}" data-locked="${tileState === 'locked'}">
-          <div class="activity-card__medal">${pillarIcon(day.pillarIcon)}</div>
-          <div class="activity-card__day">${day.label} · ${day.theme}</div>
-          <div class="activity-card__title">${activity.title}</div>
-          <div class="activity-card__status ${tileState === 'done' ? 'done' : tileState}">${statusIcon} ${statusText}</div>
-        </div>`;
-    }).join('');
+  // Shared by both the main activity board and the dedicated Race Day
+  // Trivia section below — same card markup either way.
+  function activityCardHTML({ day, activity, tileState }, i) {
+    const rot = [-2, 1.5, -1, 2, -1.5][i % 5];
+    const statusIcon = tileState === 'done'
+      ? `<span style="color:var(--success);">${Icons.check}</span>`
+      : tileState === 'locked' ? `<span style="width:16px;display:inline-block;color:var(--ink-soft);">${Icons.lock}</span>` : '';
+    const statusText = tileState === 'active' ? 'Play now →' : tileState === 'locked' ? 'Locked' : tileState === 'done' ? 'Completed' : "Time's up";
+    return `
+      <div class="sketch-card activity-card ${tileState === 'locked' ? 'locked' : 'interactive'} ${tileState}"
+           style="--hover-rot:${rot}deg;" data-activity="${activity.id}" data-locked="${tileState === 'locked'}">
+        <div class="activity-card__medal">${pillarIcon(day.pillarIcon)}</div>
+        <div class="activity-card__day">${day.label} · ${day.theme}</div>
+        <div class="activity-card__title">${activity.title}</div>
+        <div class="activity-card__status ${tileState === 'done' ? 'done' : tileState}">${statusIcon} ${statusText}</div>
+      </div>`;
+  }
 
+  function wireActivityCardClicks(grid) {
     grid.querySelectorAll('.activity-card').forEach((card) => {
       card.addEventListener('click', () => {
         if (card.dataset.locked === 'true') {
@@ -473,6 +527,41 @@ const App = (() => {
         openActivityModal(card.dataset.activity);
       });
     });
+  }
+
+  function renderActivityBoard() {
+    const days = AppState.computeDashboardDays(currentUser);
+    const grid = document.getElementById('activityGrid');
+    // Race Day Trivia now has its own dedicated section (renderTriviaSection
+    // below) — excluded here so it doesn't also show as a repeated daily
+    // card in the general list. Still one card per remaining remote
+    // activity, ordered Monday→Friday; the grid reflows via CSS (auto-fit
+    // — see .activity-grid) to whatever count that leaves.
+    const cards = days.flatMap(({ day, activityStates }) =>
+      activityStates
+        .filter(({ activity }) => !activity.id.startsWith('trivia'))
+        .map(({ activity, tileState }) => ({ day, activity, tileState })));
+
+    grid.innerHTML = cards.map(activityCardHTML).join('');
+    wireActivityCardClicks(grid);
+  }
+
+  // Race Day Trivia's own weekly section: one card per day, each showing
+  // that day's lock/active/completed state via the same day-gating logic
+  // as everything else (AppState.computeDashboardDays) — just surfaced on
+  // its own rather than mixed into the general activities list. By
+  // convention each day's trivia activity is always `activityStates[0]`
+  // (see data/schedule.js).
+  function renderTriviaSection() {
+    const days = AppState.computeDashboardDays(currentUser);
+    const grid = document.getElementById('triviaGrid');
+    if (!grid) return;
+    const cards = days.map(({ day, activityStates }) => {
+      const { activity, tileState } = activityStates.find(({ activity: a }) => a.id.startsWith('trivia'));
+      return { day, activity, tileState };
+    });
+    grid.innerHTML = cards.map(activityCardHTML).join('');
+    wireActivityCardClicks(grid);
   }
 
   function openBingoModal() {
@@ -526,6 +615,19 @@ const App = (() => {
   }
 
   // ---------------- Generic modal ----------------
+  // `modalLocked`: once a mid-session-cheating-risk activity (Hyperlink
+  // Race, Snap Judgement, Race Day Trivia) has actually started, it calls
+  // ctx.lock() — see openActivityModal below — which disables both the
+  // backdrop-click and the ✕ dismissal this modal normally offers, so an
+  // accidental/intentional outside click can't bail someone out mid-attempt
+  // to go look an answer up and come back. There is deliberately no in-app
+  // way out while locked — not even a Quit control — until the activity is
+  // actually completed and submitted (ctx.done(), which always unlocks via
+  // closeModal below). A page refresh still works as an escape hatch if
+  // something goes technically wrong — nothing here blocks navigation or
+  // reload, this only guards the modal's own UI.
+  let modalLocked = false;
+
   function ensureModal() {
     let modal = document.getElementById('genericModal');
     if (!modal) {
@@ -535,31 +637,50 @@ const App = (() => {
       modal.style.display = 'none';
       modal.innerHTML = `<div class="sketch-modal"><button class="modal-close" id="genericModalClose">✕</button><div id="genericModalBody"></div></div>`;
       document.body.appendChild(modal);
-      modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
-      modal.querySelector('#genericModalClose').addEventListener('click', closeModal);
+      modal.addEventListener('click', (e) => {
+        if (e.target !== modal || modalLocked) return;
+        closeModal();
+      });
+      modal.querySelector('#genericModalClose').addEventListener('click', () => {
+        if (modalLocked) return;
+        closeModal();
+      });
     }
     return modal;
   }
   function openModal(renderFn) {
+    modalLocked = false; // every new modal open starts unlocked, regardless of what the previous one was showing
     const modal = ensureModal();
     modal.style.display = 'flex';
+    modal.querySelector('#genericModalClose').style.display = '';
     const body = modal.querySelector('#genericModalBody');
     renderFn(body);
   }
   function closeModal() {
+    modalLocked = false;
     const modal = document.getElementById('genericModal');
     if (modal) modal.style.display = 'none';
+  }
+  // Hides the ✕ too while locked — a visible-but-inert close button reads
+  // as broken, not as "this is deliberately not dismissible right now."
+  function setModalLocked(locked) {
+    modalLocked = locked;
+    const closeBtn = document.getElementById('genericModalClose');
+    if (closeBtn) closeBtn.style.display = locked ? 'none' : '';
   }
 
   function openActivityModal(activityId) {
     const fnMap = {
       hyperlinkRace: Games.hyperlinkRace,
       snapJudgement: Games.snapJudgement,
-      trivia: Games.trivia,
       photoFinish: Games.photoFinish,
       nomination: Games.nomination,
     };
-    const fn = fnMap[activityId];
+    // Race Day Trivia now has 5 day-specific ids (triviaMon..triviaFri —
+    // see data/schedule.js) all handled by the same Games.trivia, which
+    // reads which day it's running via the `day` argument below rather
+    // than needing 5 separate map entries here.
+    const fn = activityId.startsWith('trivia') ? Games.trivia : fnMap[activityId];
     if (!fn) return;
     const day = findActivityDay(activityId); // schedule is the single source of truth for the day/theme header
     openModal((body) => {
@@ -574,7 +695,7 @@ const App = (() => {
       fn(body, currentUser, day, {
         done: async () => {
           await refreshUser();
-          closeModal();
+          closeModal(); // always unlocks too — see closeModal
           showHub();
           Toast.show('🏁 Nice work — logged!', 'success');
         },
@@ -582,6 +703,11 @@ const App = (() => {
           await refreshUser();
           showHub();
         },
+        // Cheating-risk activities (Hyperlink Race, Snap Judgement, Race Day
+        // Trivia) call lock() the moment a session actually starts. There's
+        // no unlock()/quit() exposed to them — see the note on modalLocked
+        // above; done() (above) is the only way this ever unlocks again.
+        lock: () => setModalLocked(true),
       });
     });
   }
@@ -597,7 +723,7 @@ const App = (() => {
   // Shown only to a user who has actually played the secret mini-game (see
   // visibleBoards below) — undiscovered players don't get a hint that this
   // tab exists at all, keeping the easter-egg's spirit intact.
-  const SECRET_BOARD = { key: 'minigameEntries', label: '🤫 Secret Leaderboard' };
+  const SECRET_BOARD = { key: 'minigameEntries', label: 'Secret Leaderboard' };
 
   // Per-user, not global: whether *this* user has a recorded mini-game
   // score (not just whether they've clicked the mascot enough times to
@@ -648,6 +774,14 @@ const App = (() => {
       rows = await Store.getLeaderboard(active, { orderBy: 'votes', direction: 'desc' });
       scoreLabel = 'votes';
       getScore = (r) => r.votes || 0;
+    } else if (active === 'triviaEntries') {
+      // Race Day Trivia is now 5 separate daily entries per user (see
+      // Store.submitTriviaDay), so triviaEntries itself has multiple docs
+      // per user rather than one — the leaderboard reads the running
+      // cumulative total off the user doc instead, same pattern as
+      // 'combined' just scoped to trivia's own field.
+      rows = await Store.getLeaderboard('users', { orderBy: 'triviaTotalScore', direction: 'desc' });
+      getScore = (r) => r.triviaTotalScore || 0;
     } else {
       // Covers every remaining per-activity board generically, including
       // the secret one (minigameEntries) — same {code, score} row shape.
@@ -709,7 +843,7 @@ const App = (() => {
   async function maybeShowFinishLine() {
     if (AppState.bingoFullHouse(currentUser) && !currentUser.finishLineSeenAt) {
       await Store.markFinishLineSeen(currentUser.code);
-      currentUser.finishLineSeenAt = MockDB.now();
+      currentUser.finishLineSeenAt = FirestoreDB.now();
       const overlay = document.createElement('div');
       overlay.className = 'finish-overlay';
       overlay.innerHTML = `

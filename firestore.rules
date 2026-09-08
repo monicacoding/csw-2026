@@ -24,6 +24,16 @@ service cloud.firestore {
 
     match /triviaEntries/{code} {
       allow read, write: if code.matches('^[A-Z]{4}$');
+
+      // Race Day Trivia runs daily now — each day's 5-question set is its
+      // own doc in this subcollection (triviaEntries/{code}/days/{dayId} —
+      // see Store.submitTriviaDay in js/store.js) rather than one flat doc
+      // per user, so it needs its own match block here. A rule on the
+      // parent /triviaEntries/{code} document does not implicitly cover
+      // its subcollections.
+      match /days/{dayId} {
+        allow read, write: if code.matches('^[A-Z]{4}$');
+      }
     }
 
     match /photoFinishEntries/{code} {
