@@ -2,7 +2,7 @@
 // The five activities. Each render function takes the modal body element,
 // the current user, that activity's schedule `day` entry (label/theme —
 // see data/schedule.js, the single source of truth for that header text),
-// and a `ctx` object with two ways to hand control back to app.js:
+// a `ctx` object with two ways to hand control back to app.js:
 //   - ctx.done(): submission is final — refresh user state, close the
 //     modal, bounce to the hub with a toast (Hyperlink Race, Snap
 //     Judgement, Trivia).
@@ -10,6 +10,17 @@
 //     should update in the background, but the modal stays open so the
 //     activity can show a post-submit view in place (Photo Finish's
 //     Gallery, the nomination's Recognition Wall).
+// ...and, for the three that support it (Hyperlink Race, Trivia, Snap
+// Judgement), an optional 5th argument `resumeState` — the saved
+// in-progress-session doc when js/app.js's resumeInProgressSession found
+// one on login, or undefined for a normal click. Each of those three
+// checks for it at the very top and, if present, skips its own intro
+// screen entirely and jumps straight into the running game pre-loaded
+// with the saved state (current page/question/round, elapsed-time base,
+// answers so far), calling ctx.lock() immediately — see each activity's
+// own run*() function for the persistence writes that keep that saved
+// state current, and Store.js's save*Session/get*Session/clear*Session
+// functions for where it actually lives.
 // Every activity is one-submission-per-user, guarded with an early
 // `Store.hasSubmitted` check.
 // ---------------------------------------------------------------------------
@@ -215,7 +226,15 @@ const Games = (() => {
     return `✅ You finished in ${time}${entry.wordCorrect ? '' : " (the word wasn't quite right)"} — ${entry.score} pts.`;
   }
 
-  async function hyperlinkRace(body, user, day, ctx) {
+  // `resumeState`: the saved doc from `hyperlinkRaceProgress/{code}` when
+  // js/app.js found one on login, or null/undefined for a normal click —
+  // see the module comment up top.
+  async function hyperlinkRace(body, user, day, ctx, resumeState) {
+    if (resumeState) {
+      ctx.lock(); // no in-app way out until it's finished, same as a fresh start
+      runHyperlinkRace(body, user, day, ctx, resumeState);
+      return;
+    }
     const already = await Store.hasSubmitted('hyperlinkRaceEntries', user.code);
     if (already) {
       const entry = await Store.getEntry('hyperlinkRaceEntries', user.code);
@@ -228,38 +247,55 @@ const Games = (() => {
   function renderHyperlinkIntro(body, user, day, ctx) {
     const startPage = MOCKDOCS_PAGES[MOCKDOCS_START_PAGE_ID];
     const goalPage = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID];
-    // .hr-screen-center — this activity's modal is pinned to a fixed,
-    // viewport-filling height (see openActivityModal's `pinned` option and
-    // .sketch-modal--pinned in css/sketch.css) for the whole session, so
-    // its size stays consistent across the intro, browsing, and the
-    // submit screen rather than shrink-wrapping per screen. This screen's
-    // own content is short, so it's centered within that fixed height
-    // instead of sitting at the natural top with a lot of blank modal
-    // below it — see that class's own comment for the rest of why.
-    body.innerHTML = `
-      <div class="hr-screen-center">
-        ${modalHeader(day, 'Hyperlink Race')}
-        <div class="game-explainer">
-          <p>📄 <span><strong>Goal:</strong> starting from "${escapeHtml(startPage.title)}", click through our internal docs site to find "${escapeHtml(goalPage.title)}."</span></p>
-          <p>🔍 <span>Read as you go — it isn't one obvious link, some links lead somewhere else entirely, and there's no page list to browse. Your start and goal stay pinned at the top the whole time, and Back plus a trail of everywhere you've been make backtracking easy.</span></p>
-          <p>✨ <span>Once you're actually on the destination page, one ordinary word in the article will be highlighted <strong>just for you</strong> — everyone sees the same article, but a different word.</span></p>
-          <p>🏁 <span>Hit <strong>Found It!</strong> once you're there, then type the highlighted word to finish. Faster is better.</span></p>
-        </div>
-        <button class="doodle-btn" id="hrStart" style="width:100%;">Start the Race</button>
-      </div>`;
+    body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
+      <div class="game-explainer">
+        <p>📄 <span><strong>Goal:</strong> starting from "${escapeHtml(startPage.title)}", click through our internal docs site to find "${escapeHtml(goalPage.title)}."</span></p>
+        <p>🔍 <span>Read as you go — it isn't one obvious link, some links lead somewhere else entirely, and there's no page list to browse. Your start and goal stay pinned at the top the whole time, and Back plus a trail of everywhere you've been make backtracking easy.</span></p>
+        <p>✨ <span>Once you're actually on the destination page, one ordinary word in the article will be highlighted <strong>just for you</strong> — everyone sees the same article, but a different word.</span></p>
+        <p>🏁 <span>Hit <strong>Found It!</strong> once you're there, then type the highlighted word to finish. Faster is better.</span></p>
+      </div>
+      <button class="doodle-btn" id="hrStart" style="width:100%;">Start the Race</button>`;
     body.querySelector('#hrStart').addEventListener('click', () => {
       ctx.lock(); // session starts now — no in-app way out until it's finished
       runHyperlinkRace(body, user, day, ctx);
     });
   }
 
-  function runHyperlinkRace(body, user, day, ctx) {
+  // Toggles the fixed-height/top-pinned modal treatment on or off, directly
+  // on the ancestor elements (`body` is inside #genericModalBody, itself
+  // inside .sketch-modal, inside #genericModal — see js/app.js's openModal/
+  // ensureModal). Only the browsing phase below actually needs it (so the
+  // modal's size doesn't visibly shift page to page as articles of very
+  // different lengths render); the short, fixed-length intro and submit
+  // screens read better — and used to look genuinely oversized, with a
+  // stray gap and the hub's own corner mascot faintly visible through it —
+  // shrink-wrapped at the normal size every other activity's screens use,
+  // which is what NOT calling this (or calling it with `false`) leaves them
+  // at by default.
+  function setHyperlinkModalPinned(body, pinned) {
+    const sketchModal = body.closest('.sketch-modal');
+    const backdrop = body.closest('.modal-backdrop');
+    if (sketchModal) sketchModal.classList.toggle('sketch-modal--pinned', pinned);
+    if (backdrop) backdrop.classList.toggle('modal-backdrop--top', pinned);
+  }
+
+  // `resumeState`, when present, is `{ history, startedAt, word }` — the
+  // exact shape Store.saveHyperlinkSession writes and js/app.js reads back
+  // (word comes from the same hyperlinkRaceProgress doc, written by
+  // assignHyperlinkAnswer below — see Store.getHyperlinkAssignment's own
+  // comment for why they live together). Reconstructs this session exactly
+  // where it left off: same trail, same assigned word (not re-rolled),
+  // and — critically — `startTime` set from the *saved* timestamp rather
+  // than `Date.now()`, so elapsed time (both the displayed clock and what
+  // actually gets scored on submit) keeps counting from the real original
+  // start, straight through the reload, not from zero.
+  function runHyperlinkRace(body, user, day, ctx, resumeState) {
     // The trail of pages visited this run, in order — the current page is
     // always the last entry. Doubles as both the "internal navigation
     // state" Found It! checks against (see below) and the data the trail
     // breadcrumb renders from; there's no separate "current page" variable
     // to keep in sync with it.
-    let history = [MOCKDOCS_START_PAGE_ID];
+    let history = resumeState?.history?.length ? [...resumeState.history] : [MOCKDOCS_START_PAGE_ID];
     let phase = 'browsing'; // 'browsing' | 'submitting'
     // Whether the visited-pages trail is showing its full expanded panel
     // or just the collapsed "Path: N pages" toggle (the default) — see
@@ -270,10 +306,17 @@ const Games = (() => {
     // The candidate assigned to this player — set exactly once, the first
     // time the goal page is reached (see renderBrowsing below), and reused
     // on every later visit so the highlighted word doesn't jump around if
-    // they leave and come back before hitting Found It!.
-    let assignedCandidate = null;
+    // they leave and come back before hitting Found It!. On resume, if a
+    // word was already assigned before the reload, reconstruct the same
+    // candidate object (not just the word) so its `paragraph` index is
+    // available for re-highlighting — matching by word against the goal
+    // page's own candidate list rather than trusting a resumed shape that
+    // might not carry `paragraph` itself.
+    let assignedCandidate = resumeState?.word
+      ? (MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID].answerCandidates.find((c) => c.word === resumeState.word) || null)
+      : null;
     let elapsedMs = null;
-    const startTime = Date.now();
+    const startTime = resumeState?.startedAt ? new Date(resumeState.startedAt).getTime() : Date.now();
     const startPage = MOCKDOCS_PAGES[MOCKDOCS_START_PAGE_ID];
     const goalPage = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID];
 
@@ -286,8 +329,8 @@ const Games = (() => {
     // Back button) needs to start a fresh one rather than resume a
     // cleared-and-now-stale interval id. `startTime` itself never resets,
     // so the displayed time — and the elapsed time actually scored on
-    // submit — keeps counting through a cancel-and-return exactly like it
-    // would if Found It! had never been clicked.
+    // submit — keeps counting through a cancel-and-return (or a full page
+    // reload) exactly like it would if Found It! had never been clicked.
     let timerInterval = null;
     function startTimerTick() {
       clearInterval(timerInterval); // idempotent — harmless if already stopped
@@ -301,6 +344,18 @@ const Games = (() => {
     }
     startTimerTick();
 
+    // Fire-and-forget, called after every navigation so a reload mid-run
+    // resumes from wherever this player actually got to, not just where
+    // they were when the session first started. `merge: true` under the
+    // hood (see Store.saveHyperlinkSession) — this shares a doc with the
+    // word-assignment write below, and neither should ever clobber the
+    // other's fields.
+    function persistSession() {
+      Store.saveHyperlinkSession(user.code, { history, startedAt: new Date(startTime).toISOString() })
+        .catch((e) => console.warn('Could not persist Hyperlink Race session', e));
+    }
+    persistSession(); // establishes/refreshes the doc immediately, whether this is a fresh start or a resume
+
     // Following an in-body link always pushes a new entry, even onto a page
     // already earlier in the trail (a genuine revisit, not a jump) — Back
     // and the trail breadcrumb below are the two ways to actually move
@@ -309,6 +364,7 @@ const Games = (() => {
       if (!MOCKDOCS_PAGES[pageId]) return;
       history.push(pageId);
       trailExpanded = false;
+      persistSession();
       render();
     }
 
@@ -319,6 +375,7 @@ const Games = (() => {
       if (history.length <= 1) return;
       history.pop();
       trailExpanded = false;
+      persistSession();
       render();
     }
 
@@ -329,10 +386,12 @@ const Games = (() => {
       if (i < 0 || i >= history.length - 1) return; // last entry is the current page — not a jump target
       history = history.slice(0, i + 1);
       trailExpanded = false;
+      persistSession();
       render();
     }
 
     function renderBrowsing() {
+      setHyperlinkModalPinned(body, true); // only this phase needs the fixed-height treatment — see that function's own comment
       const pageId = history[history.length - 1];
       if (pageId === MOCKDOCS_GOAL_PAGE_ID && !assignedCandidate) {
         const candidates = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID].answerCandidates;
@@ -401,18 +460,14 @@ const Games = (() => {
     }
 
     function renderSubmit() {
-      // Same .hr-screen-center treatment as renderHyperlinkIntro above, and
-      // for the same reason — short content, fixed-height pinned modal.
-      body.innerHTML = `
-        <div class="hr-screen-center">
-          ${modalHeader(day, 'Hyperlink Race')}
-          <div style="text-align:center;">
-            <p style="font-size:40px;">🏁</p>
-            <p style="color:var(--ink-soft);">You made it! What word was highlighted, just for you?</p>
-            <div class="field"><label>Highlighted word</label><input id="hrWordAnswer" type="text" autocomplete="off" placeholder="Type the word…" /></div>
-            <button class="doodle-btn navy" id="hrSubmit" style="width:100%;">Submit</button>
-            <button class="doodle-btn ghost" id="hrCancel" style="width:100%;margin-top:10px;">← Back to Article</button>
-          </div>
+      setHyperlinkModalPinned(body, false); // short, fixed content — normal shrink-wrapped modal size, same as every other activity's screens
+      body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
+        <div style="text-align:center;">
+          <p style="font-size:40px;">🏁</p>
+          <p style="color:var(--ink-soft);">You made it! What word was highlighted, just for you?</p>
+          <div class="field"><label>Highlighted word</label><input id="hrWordAnswer" type="text" autocomplete="off" placeholder="Type the word…" /></div>
+          <button class="doodle-btn navy" id="hrSubmit" style="width:100%;">Submit</button>
+          <button class="doodle-btn ghost" id="hrCancel" style="width:100%;margin-top:10px;">← Back to Article</button>
         </div>`;
 
       // Not a submission attempt, not an exit from the session — just
@@ -452,6 +507,11 @@ const Games = (() => {
           collection: 'hyperlinkRaceEntries', code: user.code, bingoKey: 'hyperlinkRace',
           scoreDelta: score, data: { elapsedMs, wordCorrect, rawAnswer: raw, score },
         });
+        // The in-progress session's job is done the moment a real
+        // submission lands — clear it so a future login never mistakes
+        // this finished run for one still in progress (see
+        // resumeInProgressSession in js/app.js).
+        await Store.clearHyperlinkSession(user.code).catch((e) => console.warn('Could not clear Hyperlink Race session', e));
         ctx.done();
       });
     }
@@ -494,7 +554,18 @@ const Games = (() => {
     return `✅ You scored ${entry.score} pts — ${entry.correctCount}/${entry.totalRounds} correct.`;
   }
 
-  async function snapJudgement(body, user, day, ctx) {
+  // `resumeState`: the saved doc from `snapJudgementProgress/{code}`, or
+  // null/undefined for a normal click — see the module comment up top. A
+  // resume always goes straight into the round in progress, bypassing the
+  // intro screen, the already-submitted check (a resumable session is by
+  // definition not yet submitted), and the desktop-only gate (the session
+  // could only have started on desktop in the first place).
+  async function snapJudgement(body, user, day, ctx, resumeState) {
+    if (resumeState) {
+      ctx.lock(); // no in-app way out until it's finished, same as a fresh start
+      runSnapRounds(body, user, day, ctx, resumeState);
+      return;
+    }
     const already = await Store.hasSubmitted('snapJudgementEntries', user.code);
     if (already) {
       const entry = await Store.getEntry('snapJudgementEntries', user.code);
@@ -536,16 +607,45 @@ const Games = (() => {
     if (level >= SJ_LEVEL_COUNT) body.querySelector('#sjReveal').disabled = true;
   }
 
-  function runSnapRounds(body, user, day, ctx) {
+  // `resumeState`, when present, is `{ roundIdx, level, roundResults,
+  // startedAt }` — the exact shape Store.saveSnapSession writes and
+  // js/app.js reads back. `correctCount` isn't part of that shape: it's
+  // always recomputed from `roundResults` (here and in `finish()`) rather
+  // than persisted and trusted separately, so it can never drift out of
+  // sync with the results it's supposed to summarize.
+  function runSnapRounds(body, user, day, ctx, resumeState) {
     const rounds = SNAP_ROUNDS;
-    let roundIdx = 0;
+    let roundIdx = resumeState?.roundIdx || 0;
     let level = 1;
-    let correctCount = 0;
-    const roundResults = []; // { correct, level, product, guess }
-    const startTime = Date.now();
+    // The reveal level the resumed round was at — applied once, the first
+    // time renderRound() runs after a resume, then never again (a later,
+    // genuinely new round should still start each round at level 1). See
+    // the isResuming guard inside renderRound() below.
+    let resumeLevel = resumeState?.level || 1;
+    let isResuming = !!resumeState;
+    const roundResults = resumeState?.roundResults ? [...resumeState.roundResults] : []; // { correct, level, product, guess }
+    let correctCount = roundResults.filter((r) => r.correct).length;
+    const startTime = resumeState?.startedAt ? new Date(resumeState.startedAt).getTime() : Date.now();
+
+    // Fire-and-forget, called whenever this run's state meaningfully
+    // changes (a new round starts, or the reveal level within the current
+    // round increases) so a reload mid-session resumes from wherever this
+    // player actually got to. See the module-level comment for the
+    // accepted small residual race window around a round-submit click —
+    // this isn't called mid-transition, only at settled points.
+    function persistSession() {
+      Store.saveSnapSession(user.code, { roundIdx, level, roundResults, startedAt: new Date(startTime).toISOString() })
+        .catch((e) => console.warn('Could not persist Snap Judgement session', e));
+    }
 
     function renderRound() {
-      level = 1;
+      if (isResuming) {
+        level = resumeLevel;
+        isResuming = false;
+      } else {
+        level = 1;
+      }
+      persistSession(); // settled point: a (possibly resumed) round has just started at a known level
       const round = rounds[roundIdx];
       body.innerHTML = modalHeader(day, 'Snap Judgement') + `
         <div style="text-align:center;">
@@ -587,10 +687,17 @@ const Games = (() => {
       const submitBtn = body.querySelector('#sjSubmit');
       guessEl.addEventListener('change', () => { submitBtn.disabled = !guessEl.value; });
 
+      // The template above always renders at level 1's clip/fill/marker —
+      // if this round was resumed partway through its reveals, bring the
+      // just-built DOM up to the actual resumed level right away, same as
+      // a real "Reveal More" click would have left it.
+      if (level > 1) snapUpdateRevealUI(body, level);
+
       body.querySelector('#sjReveal').addEventListener('click', () => {
         if (level >= SJ_LEVEL_COUNT) return;
         level += 1;
         snapUpdateRevealUI(body, level);
+        persistSession();
       });
 
       submitBtn.addEventListener('click', () => {
@@ -645,6 +752,11 @@ const Games = (() => {
           collection: 'snapJudgementEntries', code: user.code, bingoKey: 'snapJudgement',
           scoreDelta: score, data: { score, correctCount, totalRounds: rounds.length, correctnessPoints, revealBonus, speedBonus, roundResults },
         });
+        // The in-progress session's job is done the moment a real
+        // submission lands — clear it so a future login never mistakes
+        // this finished run for one still in progress (see
+        // resumeInProgressSession in js/app.js).
+        await Store.clearSnapSession(user.code).catch((e2) => console.warn('Could not clear Snap Judgement session', e2));
         ctx.done();
       });
     }
@@ -676,8 +788,20 @@ const Games = (() => {
     return TRIVIA_DAY_ORDER.filter((d) => bingo[`trivia${capitalize(d)}`]).length;
   }
 
-  async function trivia(body, user, day, ctx) {
+  // `resumeState`: the saved doc from `triviaProgress/{code}`, or null/
+  // undefined for a normal click — see the module comment up top. Its
+  // `dayId` is what let js/app.js's resumeInProgressSession pick the right
+  // `trivia${capitalize(dayId)}` activity (and therefore the right `day`,
+  // passed in here as usual) to reopen in the first place; by the time
+  // this function runs, `day.id` and `resumeState.dayId` are already the
+  // same value.
+  async function trivia(body, user, day, ctx, resumeState) {
     const dayId = day.id; // 'mon'..'fri' — which day's 5-question set this is
+    if (resumeState) {
+      ctx.lock(); // no in-app way out until it's finished, same as a fresh start
+      runTrivia(body, user, day, ctx, resumeState);
+      return;
+    }
     const already = await Store.hasSubmittedTriviaDay(user.code, dayId);
     if (already) {
       const entry = await Store.getTriviaDayEntry(user.code, dayId);
@@ -712,11 +836,35 @@ const Games = (() => {
     });
   }
 
-  function runTrivia(body, user, day, ctx) {
+  // `resumeState`, when present, is `{ dayId, idx, answers, startedAt }` —
+  // the exact shape Store.saveTriviaSession writes and js/app.js reads
+  // back. `correctCount` isn't part of that shape: it's always recomputed
+  // from `answers` (below and in `finish()`) by comparing each saved
+  // choice index against that question's own `correctIndex`, rather than
+  // persisted and trusted separately.
+  function runTrivia(body, user, day, ctx, resumeState) {
     const dayId = day.id;
     const questions = TRIVIA_BY_DAY[dayId] || [];
-    let idx = 0, correctCount = 0, locked = false;
-    const startTime = Date.now();
+    let idx = resumeState?.idx || 0;
+    // Which choice index was picked for each question answered so far,
+    // in order — needed both to recompute correctCount below and to
+    // satisfy "answers given so far" as its own persisted field.
+    const answers = resumeState?.answers ? [...resumeState.answers] : [];
+    let correctCount = answers.filter((a, i) => a === questions[i]?.correctIndex).length;
+    let locked = false;
+    const startTime = resumeState?.startedAt ? new Date(resumeState.startedAt).getTime() : Date.now();
+
+    // Fire-and-forget, called after every answer is locked in so a reload
+    // mid-session resumes on the next unanswered question with the true
+    // original start time intact. See the module-level comment for the
+    // accepted small residual race window around a question's own 700ms
+    // reveal delay — this is called once the choice is recorded, not
+    // mid-transition.
+    function persistSession() {
+      Store.saveTriviaSession(user.code, { dayId, idx, answers, startedAt: new Date(startTime).toISOString() })
+        .catch((e) => console.warn('Could not persist Race Day Trivia session', e));
+    }
+    persistSession(); // establishes/refreshes the doc immediately, whether this is a fresh start or a resume
 
     function renderQuestion() {
       locked = false;
@@ -744,12 +892,16 @@ const Games = (() => {
       if (locked) return;
       locked = true;
       if (i === q.correctIndex) correctCount += 1;
+      answers.push(i);
       [...choicesEl.children].forEach((b, bi) => {
         if (bi === q.correctIndex) { b.style.background = 'var(--sage)'; b.style.borderColor = 'var(--success)'; b.style.color = 'var(--success)'; }
         else if (bi === i) { b.style.background = '#FBE4DF'; b.style.borderColor = 'var(--brick)'; b.style.color = 'var(--brick)'; }
         b.disabled = true;
       });
-      setTimeout(() => { idx += 1; if (idx < questions.length) renderQuestion(); else finish(); }, 700);
+      setTimeout(() => {
+        idx += 1;
+        if (idx < questions.length) { persistSession(); renderQuestion(); } else finish();
+      }, 700);
     }
 
     async function finish() {
@@ -785,6 +937,12 @@ const Games = (() => {
           code: user.code, dayId,
           scoreDelta: score, data: { score, correctCount, totalQuestions: questions.length, basePoints, speedBonus },
         });
+        // The in-progress session's job is done the moment a real
+        // submission lands — clear it so a future login never mistakes
+        // this finished day's run for one still in progress (and so it
+        // never leaks into a future day's set — see resumeInProgressSession
+        // in js/app.js).
+        await Store.clearTriviaSession(user.code).catch((e2) => console.warn('Could not clear Race Day Trivia session', e2));
         ctx.done();
       });
     }

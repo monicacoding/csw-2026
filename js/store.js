@@ -240,6 +240,61 @@ const Store = (() => {
     return FirestoreDB.getDoc('hyperlinkRaceProgress', code);
   }
 
+  // ---- In-progress session persistence (resumable across a reload) -------
+  // Three activities — Hyperlink Race, Race Day Trivia, Snap Judgement —
+  // write their running session state here continuously (see each game's
+  // own persistSession() in js/games.js) once ctx.lock() engages, not only
+  // at submission. js/app.js's resumeInProgressSession reads these back at
+  // app load/login, and reopens whichever one it finds — bypassing the hub
+  // entirely — in its exact saved state, lockout already engaged.
+  //
+  // Hyperlink Race's session doc shares `hyperlinkRaceProgress/{code}` with
+  // the word-assignment write above (assignHyperlinkAnswer) — both always
+  // write with `merge: true`, so neither ever clobbers the other's fields;
+  // a session doc's presence (its `history`/`startedAt` fields) is what
+  // resumeInProgressSession actually checks for, not the doc's mere
+  // existence, since an assignment-only doc from a much earlier round could
+  // otherwise exist without a live session behind it.
+  async function saveHyperlinkSession(code, { history, startedAt }) {
+    await FirestoreDB.setDoc('hyperlinkRaceProgress', code, { code, history, startedAt }, true);
+  }
+
+  async function clearHyperlinkSession(code) {
+    // Only the session fields are cleared, via an explicit merge-overwrite
+    // to null rather than deleteDoc — deleting the whole doc would also
+    // throw away the word assignment those two share, which
+    // getHyperlinkAssignment still needs to validate a Found It! submission
+    // against right up until the moment that submission actually lands.
+    await FirestoreDB.setDoc('hyperlinkRaceProgress', code, { history: null, startedAt: null }, true);
+  }
+
+  // Trivia is per-day, so the saved doc also carries `dayId` — the only way
+  // resumeInProgressSession can know which day's `trivia${capitalize(dayId)}`
+  // activity (and therefore which question set) to reopen.
+  async function saveTriviaSession(code, { dayId, idx, answers, startedAt }) {
+    await FirestoreDB.setDoc('triviaProgress', code, { code, dayId, idx, answers, startedAt }, true);
+  }
+
+  async function getTriviaSession(code) {
+    return FirestoreDB.getDoc('triviaProgress', code);
+  }
+
+  async function clearTriviaSession(code) {
+    await FirestoreDB.deleteDoc('triviaProgress', code);
+  }
+
+  async function saveSnapSession(code, { roundIdx, level, roundResults, startedAt }) {
+    await FirestoreDB.setDoc('snapJudgementProgress', code, { code, roundIdx, level, roundResults, startedAt }, true);
+  }
+
+  async function getSnapSession(code) {
+    return FirestoreDB.getDoc('snapJudgementProgress', code);
+  }
+
+  async function clearSnapSession(code) {
+    await FirestoreDB.deleteDoc('snapJudgementProgress', code);
+  }
+
   async function getLeaderboard(collection, { orderBy, direction = 'desc', limit = 50 }) {
     let rows = await FirestoreDB.listCollection(collection);
     rows.sort((a, b) => {
@@ -348,6 +403,13 @@ const Store = (() => {
   // every other tester's own subcollection, which is a meaningfully
   // different (and more invasive) operation than resetting your own
   // account, and isn't attempted here.
+  //
+  // Also deletes `triviaProgress`/{code} and `snapJudgementProgress`/{code}
+  // — the two newer in-progress-session docs — alongside the pre-existing
+  // `hyperlinkRaceProgress` delete, so a dev reset doesn't leave a stale
+  // resumable session behind that would hijack this code's next login (see
+  // resumeInProgressSession in js/app.js) into a game the reset was meant
+  // to clear.
   async function resetUserProgress(code) {
     const fresh = {
       code,
@@ -370,6 +432,8 @@ const Store = (() => {
       FirestoreDB.deleteDoc('hyperlinkRaceEntries', code),
       FirestoreDB.deleteDoc('hyperlinkRaceProgress', code),
       FirestoreDB.deleteDoc('snapJudgementEntries', code),
+      FirestoreDB.deleteDoc('snapJudgementProgress', code),
+      FirestoreDB.deleteDoc('triviaProgress', code),
       FirestoreDB.deleteDoc('photoFinishEntries', code),
       FirestoreDB.deleteDoc('nominations', code),
       FirestoreDB.deleteDoc('minigameEntries', code),
@@ -394,6 +458,14 @@ const Store = (() => {
     getTriviaDaysCompleted,
     assignHyperlinkAnswer,
     getHyperlinkAssignment,
+    saveHyperlinkSession,
+    clearHyperlinkSession,
+    saveTriviaSession,
+    getTriviaSession,
+    clearTriviaSession,
+    saveSnapSession,
+    getSnapSession,
+    clearSnapSession,
     getLeaderboard,
     getCombinedLeaderboard,
     getPhotoFinishEntries,

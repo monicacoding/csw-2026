@@ -117,10 +117,66 @@ const App = (() => {
     if (code) {
       currentUser = await Store.getOrCreateUser(code);
       showHub();
-      maybeShowOnboarding();
+      const resumed = await resumeInProgressSession();
+      if (!resumed) maybeShowOnboarding();
     } else {
       showLogin();
     }
+  }
+
+  // ---------------- Resume an in-progress session ----------------
+  // Checked once per login/app-load — right after showHub() in init()'s
+  // auto-continued-session path and in the login form's own submit handler
+  // below, in both cases taking priority over maybeShowOnboarding() (an
+  // interrupted session matters more than the welcome tour). Looks across
+  // all three resumable activities' progress docs (see Store.
+  // saveHyperlinkSession/saveTriviaSession/saveSnapSession in js/store.js)
+  // for one that's actually in progress, and if found, reopens that
+  // activity's modal directly in its exact saved state via
+  // openActivityModal(activityId, resumeState) — bypassing the hub,
+  // day-gating, and deadline checks entirely (see openActivityModal's own
+  // comment for why a resume is deliberately let through regardless of
+  // what the calendar says now). The existing modal lockout (no ✕, no
+  // backdrop-dismiss) applies immediately, the same way it would for a
+  // freshly-started session — see ctx.lock() inside each game's resume
+  // branch in js/games.js. Returns true if a session was resumed, false
+  // otherwise, so callers know whether to fall through to onboarding.
+  //
+  // "In progress" here means only "started and not yet submitted," checked
+  // via each doc's own presence/fields — there's deliberately no separate
+  // staleness check for a session abandoned since a previous day, beyond
+  // what submitting naturally clears. See this round's README entry for
+  // why that's an accepted, deliberate scope limit rather than an oversight.
+  async function resumeInProgressSession() {
+    // Hyperlink Race's session lives in the same doc as its word
+    // assignment (hyperlinkRaceProgress/{code} — see
+    // Store.saveHyperlinkSession's own comment): `history`/`startedAt`
+    // being present is what actually marks a live session, not the doc's
+    // mere existence (an assignment-only doc from a much earlier round, or
+    // one already cleared on submit, has neither).
+    const hr = await Store.getHyperlinkAssignment(currentUser.code).catch(() => null);
+    if (hr?.history?.length && hr?.startedAt) {
+      openActivityModal('hyperlinkRace', { history: hr.history, startedAt: hr.startedAt, word: hr.word });
+      return true;
+    }
+
+    // Trivia's saved doc carries `dayId` — the only way to know which of
+    // the 5 day-specific activity ids (triviaMon..triviaFri — see
+    // data/schedule.js) to reopen.
+    const trivia = await Store.getTriviaSession(currentUser.code).catch(() => null);
+    if (trivia?.dayId && trivia?.startedAt) {
+      const activityId = `trivia${trivia.dayId[0].toUpperCase()}${trivia.dayId.slice(1)}`;
+      openActivityModal(activityId, trivia);
+      return true;
+    }
+
+    const snap = await Store.getSnapSession(currentUser.code).catch(() => null);
+    if (snap?.startedAt) {
+      openActivityModal('snapJudgement', snap);
+      return true;
+    }
+
+    return false;
   }
 
   // ---------------- Login ----------------
@@ -206,7 +262,8 @@ const App = (() => {
 
         Auth.setCurrentCode(code);
         showHub();
-        maybeShowOnboarding();
+        const resumed = await resumeInProgressSession();
+        if (!resumed) maybeShowOnboarding();
       } catch (err) {
         console.error(err);
         btn.disabled = false;
@@ -942,11 +999,15 @@ const App = (() => {
   // `pinned`: keeps the modal's top edge at a fixed spot on screen and its
   // own size constant, instead of the default shrink-wrap-and-recenter
   // behavior that otherwise makes the whole box visibly shift on screen
-  // whenever content height changes (Hyperlink Race's articles vary a lot
-  // page to page). See .modal-backdrop--top/.sketch-modal--pinned in
-  // css/sketch.css for what each half actually does. Everything else stays
-  // on the default shrink-wrapped/centered look, which reads better for
-  // the short, one-screen content most modals here show.
+  // whenever content height changes. See .modal-backdrop--top/.sketch-
+  // modal--pinned in css/sketch.css for what each half actually does.
+  // No caller passes this at open time any more — Hyperlink Race (the one
+  // activity that needs it, only while its browsing phase is up, not for
+  // its short intro/submit screens) instead toggles the same two classes
+  // directly on this modal's own elements mid-session via
+  // setHyperlinkModalPinned in js/games.js. Left as an openModal option
+  // too, same as `wide` above, for whatever future render wants the whole
+  // session pinned from the moment it opens rather than toggling it itself.
   async function openModal(renderFn, { wide = false, pinned = false } = {}) {
     modalLocked = false; // every new modal open starts unlocked, regardless of what the previous one was showing
     const modal = ensureModal();
@@ -978,7 +1039,20 @@ const App = (() => {
     if (closeBtn) closeBtn.style.display = locked ? 'none' : '';
   }
 
-  function openActivityModal(activityId) {
+  // `resumeState`: set only by resumeInProgressSession (below) when this is
+  // reopening an in-progress Hyperlink Race/Trivia/Snap Judgement session
+  // after a reload, rather than a normal click. Two things change when it's
+  // present: the day-gating/deadline/week-lock policy check is skipped
+  // entirely (a session legitimately started before still deserves to be
+  // finished, regardless of whether the calendar's since moved past its
+  // deadline or the week has ended while the tab was open), and it's passed
+  // through as a 5th argument to `fn` — js/games.js's hyperlinkRace/trivia/
+  // snapJudgement each check for it and, if present, skip straight past
+  // their own intro screen into the running game pre-loaded with the saved
+  // state, calling ctx.lock() immediately so the existing no-outside-
+  // click/no-quit lockout is in force before the very first render, not
+  // after some later step.
+  function openActivityModal(activityId, resumeState = null) {
     const fnMap = {
       hyperlinkRace: Games.hyperlinkRace,
       snapJudgement: Games.snapJudgement,
@@ -999,14 +1073,16 @@ const App = (() => {
     // The actual enforcement point (not just the card click handler above —
     // see activityClickPolicy's own comment) for locked/expired/week-ended
     // gating, so it can't be bypassed by any other entry point into this
-    // function (the Bingo Card's cells, a stray console call, etc.).
+    // function (the Bingo Card's cells, a stray console call, etc.) — except
+    // a resume, per the comment above. `policy` itself is still computed
+    // unconditionally either way since `viewOnly` below reads `policy.mode`.
     const todayStr = todayLocalDateString();
     const weekLocked = isWeekLocked(todayStr);
     const bingo = { ...Store.emptyBingo(), ...(currentUser.bingo || {}) };
     const submitted = !!bingo[activityId];
     const tileState = AppState.activityTileState(activity, submitted, day, todayStr, weekLocked);
     const policy = activityClickPolicy({ activity, tileState, weekLocked });
-    if (!policy.open) {
+    if (!resumeState && !policy.open) {
       Toast.show(activityBlockedToast(policy, day), 'error');
       return;
     }
@@ -1052,7 +1128,7 @@ const App = (() => {
       //    browse (and for Photo Finish, vote) during the active week.
       weekLocked,
       viewOnly: policy.mode === 'view',
-    }), { pinned: activityId === 'hyperlinkRace' });
+    }, resumeState));
   }
 
   // ---------------- Leaderboard ----------------
