@@ -1011,9 +1011,41 @@ a { color: inherit; text-decoration: none; cursor: none; }
    internal content scrolls (.sketch-modal's own overflow-y:auto, already
    in place). Scoped to whoever opts in via `pinned: true`, not the
    default — most modals here are short/one-screen and read better
-   shrink-wrapped and centered, as before. */
+   shrink-wrapped and centered, as before.
+   The height is `100vh` minus exactly the backdrop's own top+bottom
+   padding (30px + 30px — see .modal-backdrop below), not an approximate
+   vh guess: with flex-start alignment, anything less than that leaves a
+   gap between the box's bottom edge and the bottom of the (dimmed, but
+   not opaque) backdrop, through which the hub page behind it — including
+   its corner mascot — was faintly visible, reading as a stray graphic
+   floating in leftover space rather than a deliberately-composed screen. */
 .modal-backdrop--top { align-items: flex-start; }
-.sketch-modal--pinned { height: 82vh; }
+.sketch-modal--pinned {
+  height: calc(100vh - 60px);
+  /* .sketch-modal's own base rule sets max-height:88vh, which — being a
+     separate property from height — silently clamps this explicit height
+     right back down below its intended value regardless of it being more
+     specific; override it explicitly rather than leave that cap in place. */
+  max-height: none;
+}
+
+/* Hyperlink Race's short, single-screen views — the pre-game rules screen
+   and the post-Found-It! word prompt — sit inside that same fixed-height
+   pinned modal the browsing phase uses. Without this, short content just
+   sits at the natural top of the (now much taller, fixed-height) box,
+   leaving a large empty stretch of blank modal below it before the box's
+   own bottom edge — exactly the "gap" this whole rule exists to close.
+   Centers the content block vertically within the available fixed height
+   instead. The two numbers in this min-height are deliberately coupled to
+   .sketch-modal--pinned's own height (100vh - 60px) and .sketch-modal's
+   own padding (34px top + 34px bottom = 68px) above — if either changes,
+   this should too. Doesn't affect the browsing phase at all (it isn't
+   wrapped in this class), which stays top-aligned for reading, as it
+   should. */
+.hr-screen-center {
+  min-height: calc(100vh - 60px - 68px);
+  display: flex; flex-direction: column; justify-content: center;
+}
 
 /* Sticky within the modal's own scroll container (.sketch-modal has
    overflow-y:auto — see the modal rules earlier in this file) so the whole
