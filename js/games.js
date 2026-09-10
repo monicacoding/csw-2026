@@ -43,6 +43,23 @@ const Games = (() => {
 
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
+  // Races a promise against a plain timeout, resolving to `fallback` if the
+  // promise hasn't settled in time. Firestore's SDK has been observed to
+  // hang indefinitely (never resolve *or* reject) rather than fail fast
+  // when a security rule denies a request in some conditions — a plain
+  // `.catch()` doesn't help there, since it only ever fires on rejection.
+  // Used by Hyperlink Race's submit handler for exactly that scenario (a
+  // not-yet-deployed hyperlinkRaceProgress rule — see Store.getHyperlinkAssignment).
+  function withTimeout(promise, ms, fallback) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(fallback), ms);
+      promise.then(
+        (v) => { clearTimeout(timer); resolve(v); },
+        () => { clearTimeout(timer); resolve(fallback); },
+      );
+    });
+  }
+
   // Snap Judgement specifically needs a real desktop browser (its crop-
   // reveal + dropdown are tuned for a mouse) — block starting it from a
   // phone-class viewport rather than let it run in a degraded state. Race
@@ -50,9 +67,7 @@ const Games = (() => {
   // Race used to be gated here too, back when Start opened a second real
   // tab to hunt through — now that the "docs" it hunts through
   // (data/mock-docs.js) are internal views rendered inside this same
-  // modal, that rationale no longer applies; its sidebar+article layout
-  // instead gets a responsive stacked treatment on narrow viewports (see
-  // .mockdoc-layout in css/sketch.css) rather than being blocked outright.
+  // modal, that rationale no longer applies.
   function renderDesktopOnlyBlock(body, day, title) {
     body.innerHTML = modalHeader(day, title) + `
       <div style="text-align:center;">
@@ -104,9 +119,17 @@ const Games = (() => {
   // through are data/mock-docs.js's 18 fictional pages, rendered as
   // internal views inside this same modal; clicking an internal link just
   // swaps which page this render loop is showing (see runHyperlinkRace's
-  // `currentPageId`, a plain closure variable — that's the "internal
-  // navigation state" that lets Found It! be checked against where the
-  // player actually is, rather than trusting their word for it).
+  // `history` array — the current page is always its last entry, and that's
+  // the "internal navigation state" that lets Found It! be checked against
+  // where the player actually is, rather than trusting their word for it).
+  //
+  // Deliberately no sidebar/full page list — the only way to move between
+  // pages is an in-body link, which is what makes this a maze rather than a
+  // page picker. To keep that navigable without a map, three aids replace
+  // it: the goal (and start) page name stays pinned in the toolbar so it
+  // never has to be memorized, a Back button undoes one step, and a trail
+  // breadcrumb of every page visited this run lets a player jump back
+  // further than one step at once.
 
   // Wraps the single occurrence of `candidate.word` in its designated
   // paragraph (data/mock-docs.js's answerCandidates — each pinned to one
@@ -130,18 +153,29 @@ const Games = (() => {
     return `<div class="mockdoc-breadcrumb">Meridian CX Docs <span class="mockdoc-breadcrumb__sep">›</span> ${escapeHtml(page.category)} <span class="mockdoc-breadcrumb__sep">›</span> <span class="mockdoc-breadcrumb__current">${escapeHtml(page.title)}</span></div>`;
   }
 
-  // Every page, grouped by category (MOCKDOCS_CATEGORY_ORDER — see
-  // data/mock-docs.js) — a full site TOC, not just the pages reachable
-  // from wherever the player currently is, same as a real docs sidebar.
-  function mockDocsSidebarHTML(currentPageId) {
-    const sections = MOCKDOCS_CATEGORY_ORDER.map((category) => {
-      const items = Object.entries(MOCKDOCS_PAGES)
-        .filter(([, p]) => p.category === category)
-        .map(([id, p]) => `<a href="#" class="mockdoc-toc__link mockdoc-link ${id === currentPageId ? 'is-current' : ''}" data-doc-id="${id}">${escapeHtml(p.title)}</a>`)
-        .join('');
-      return `<div class="mockdoc-toc__section"><div class="mockdoc-toc__heading">${escapeHtml(category)}</div>${items}</div>`;
-    }).join('');
-    return `<nav class="mockdoc-toc">${sections}</nav>`;
+  // The trail of pages actually visited this run (runHyperlinkRace's own
+  // `history` array — see there), not the site's full page list: showing
+  // every page (the old sidebar TOC) would let someone route-find instead
+  // of reading, defeating the point of the maze. Every entry but the last
+  // (the current page, not a link) jumps back to that point in the trail —
+  // not just one step back, which is what the dedicated Back button is for.
+  function mockDocsTrailHTML(history) {
+    return history.map((id, i) => {
+      const isCurrent = i === history.length - 1;
+      const title = MOCKDOCS_PAGES[id].title;
+      return `<button type="button" class="mockdoc-trail__item ${isCurrent ? 'is-current' : ''}" data-trail-index="${i}" title="${escapeHtml(title)}" ${isCurrent ? 'disabled' : ''}>${escapeHtml(title)}</button>`;
+    }).join('<span class="mockdoc-trail__sep">›</span>');
+  }
+
+  // Delegated listener for the trail row — same pattern as
+  // wireMockDocLinks below, its own listener since it lives in the sticky
+  // toolbar rather than inside `.mockdoc`.
+  function wireMockDocsTrail(container, onJump) {
+    container.addEventListener('click', (e) => {
+      const btn = e.target.closest('.mockdoc-trail__item');
+      if (!btn || btn.disabled) return;
+      onJump(Number(btn.dataset.trailIndex));
+    });
   }
 
   function mockDocsArticleHTML(pageId, highlightCandidate) {
@@ -155,11 +189,12 @@ const Games = (() => {
       </article>`;
   }
 
-  // One delegated listener on the whole docs container catches clicks on
-  // every internal link — both the sidebar TOC and inline links inside the
-  // article body — rather than wiring each `<a>` individually. Safe to call
-  // fresh on every render: the previous container (and its listener) was
-  // just discarded along with the old innerHTML.
+  // One delegated listener on the article container catches clicks on every
+  // in-body internal link, rather than wiring each `<a>` individually. Only
+  // way to navigate now — there's no sidebar/full page list any more (see
+  // mockDocsTrailHTML above for why). Safe to call fresh on every render:
+  // the previous container (and its listener) was just discarded along
+  // with the old innerHTML.
   function wireMockDocLinks(container, onNavigate) {
     container.addEventListener('click', (e) => {
       const link = e.target.closest('.mockdoc-link');
@@ -192,7 +227,7 @@ const Games = (() => {
     body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
       <div class="game-explainer">
         <p>📄 <span><strong>Goal:</strong> starting from "${escapeHtml(startPage.title)}", click through our internal docs site to find "${escapeHtml(goalPage.title)}."</span></p>
-        <p>🔍 <span>Read as you go — it isn't one obvious link, and some links lead somewhere else entirely. The full site's sidebar is always there if you want to backtrack.</span></p>
+        <p>🔍 <span>Read as you go — it isn't one obvious link, some links lead somewhere else entirely, and there's no page list to browse. Your start and goal stay pinned at the top the whole time, and Back plus a trail of everywhere you've been make backtracking easy.</span></p>
         <p>✨ <span>Once you're actually on the destination page, one ordinary word in the article will be highlighted <strong>just for you</strong> — everyone sees the same article, but a different word.</span></p>
         <p>🏁 <span>Hit <strong>Found It!</strong> once you're there, then type the highlighted word to finish. Faster is better.</span></p>
       </div>
@@ -204,7 +239,12 @@ const Games = (() => {
   }
 
   function runHyperlinkRace(body, user, day, ctx) {
-    let currentPageId = MOCKDOCS_START_PAGE_ID;
+    // The trail of pages visited this run, in order — the current page is
+    // always the last entry. Doubles as both the "internal navigation
+    // state" Found It! checks against (see below) and the data the trail
+    // breadcrumb renders from; there's no separate "current page" variable
+    // to keep in sync with it.
+    let history = [MOCKDOCS_START_PAGE_ID];
     let phase = 'browsing'; // 'browsing' | 'submitting'
     // The candidate assigned to this player — set exactly once, the first
     // time the goal page is reached (see renderBrowsing below), and reused
@@ -213,6 +253,8 @@ const Games = (() => {
     let assignedCandidate = null;
     let elapsedMs = null;
     const startTime = Date.now();
+    const startPage = MOCKDOCS_PAGES[MOCKDOCS_START_PAGE_ID];
+    const goalPage = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID];
 
     const fmt = (ms) => {
       const s = Math.floor(ms / 1000);
@@ -226,14 +268,37 @@ const Games = (() => {
       if (el) el.textContent = fmt(Date.now() - startTime);
     }, 200);
 
+    // Following an in-body link always pushes a new entry, even onto a page
+    // already earlier in the trail (a genuine revisit, not a jump) — Back
+    // and the trail breadcrumb below are the two ways to actually move
+    // backward through history; a forward link never does.
     function navigateTo(pageId) {
       if (!MOCKDOCS_PAGES[pageId]) return;
-      currentPageId = pageId;
+      history.push(pageId);
+      render();
+    }
+
+    // Undoes exactly one step. No-op on the start page (nothing to go back
+    // to) — the button is disabled there too, this is just the same guard
+    // enforced on the handler itself rather than trusted to the UI.
+    function goBack() {
+      if (history.length <= 1) return;
+      history.pop();
+      render();
+    }
+
+    // Jumping to an earlier point in the trail discards everything after
+    // it — clicking an old breadcrumb and then reading on from there starts
+    // a new forward path from that point, same as browser history.
+    function jumpToTrailIndex(i) {
+      if (i < 0 || i >= history.length - 1) return; // last entry is the current page — not a jump target
+      history = history.slice(0, i + 1);
       render();
     }
 
     function renderBrowsing() {
-      if (currentPageId === MOCKDOCS_GOAL_PAGE_ID && !assignedCandidate) {
+      const pageId = history[history.length - 1];
+      if (pageId === MOCKDOCS_GOAL_PAGE_ID && !assignedCandidate) {
         const candidates = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID].answerCandidates;
         assignedCandidate = candidates[Math.floor(Math.random() * candidates.length)];
         // Persisted so it can be validated against at submit time even if
@@ -243,29 +308,34 @@ const Games = (() => {
         Store.assignHyperlinkAnswer(user.code, assignedCandidate.word)
           .catch((e) => console.warn('Could not persist Hyperlink Race answer assignment', e));
       }
-      const highlight = currentPageId === MOCKDOCS_GOAL_PAGE_ID ? assignedCandidate : null;
+      const highlight = pageId === MOCKDOCS_GOAL_PAGE_ID ? assignedCandidate : null;
 
       body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
         <div class="hr-toolbar">
-          <div class="hr-toolbar__timer" id="hrTimer">${fmt(Date.now() - startTime)}</div>
-          <button class="doodle-btn brick sm" id="hrFound">🏁 Found It!</button>
+          <div class="hr-toolbar__goal">🚩 Start: <strong>${escapeHtml(startPage.title)}</strong> <span class="hr-toolbar__goal-arrow">→</span> 🏁 Goal: <strong>${escapeHtml(goalPage.title)}</strong></div>
+          <div class="hr-toolbar__row">
+            <div class="hr-toolbar__timer" id="hrTimer">${fmt(Date.now() - startTime)}</div>
+            <button type="button" class="doodle-btn ghost sm" id="hrBack" ${history.length <= 1 ? 'disabled' : ''}>← Back</button>
+            <button type="button" class="doodle-btn brick sm" id="hrFound">🏁 Found It!</button>
+          </div>
+          <div class="hr-toolbar__trail" id="hrTrail">${mockDocsTrailHTML(history)}</div>
         </div>
         <div class="mockdoc">
-          ${mockDocsBreadcrumbHTML(MOCKDOCS_PAGES[currentPageId])}
-          <div class="mockdoc-layout">
-            ${mockDocsSidebarHTML(currentPageId)}
-            ${mockDocsArticleHTML(currentPageId, highlight)}
-          </div>
+          ${mockDocsBreadcrumbHTML(MOCKDOCS_PAGES[pageId])}
+          ${mockDocsArticleHTML(pageId, highlight)}
         </div>`;
 
       wireMockDocLinks(body.querySelector('.mockdoc'), navigateTo);
+      wireMockDocsTrail(body.querySelector('#hrTrail'), jumpToTrailIndex);
+      body.querySelector('#hrBack').addEventListener('click', goBack);
 
       // The actual destination check — point 4's replacement for self-
-      // report. currentPageId is this closure's own navigation state, kept
-      // in sync purely by navigateTo above; there's no way to reach
-      // "submitting" without it actually equalling the goal page's id.
+      // report. `history`'s last entry is this closure's own navigation
+      // state, kept in sync purely by navigateTo/goBack/jumpToTrailIndex
+      // above; there's no way to reach "submitting" without it actually
+      // equalling the goal page's id.
       body.querySelector('#hrFound').addEventListener('click', () => {
-        if (currentPageId !== MOCKDOCS_GOAL_PAGE_ID) {
+        if (history[history.length - 1] !== MOCKDOCS_GOAL_PAGE_ID) {
           Toast.show("📍 You're not on the destination page yet — keep exploring!", 'error');
           return;
         }
@@ -292,10 +362,12 @@ const Games = (() => {
 
         // Validate against the durably-stored assignment rather than only
         // this session's in-memory copy — see Store.assignHyperlinkAnswer.
-        // Falls back to the in-memory copy only if that read itself fails,
-        // so a transient network hiccup doesn't wrongly fail someone who
-        // typed the right word.
-        const assignment = await Store.getHyperlinkAssignment(user.code).catch(() => null);
+        // Falls back to the in-memory copy if that read fails outright *or*
+        // doesn't settle within 4s (see withTimeout above — a denied-but-
+        // not-yet-rejecting request would otherwise hang this submit
+        // button forever), so neither a transient network hiccup nor an
+        // undeployed rule wrongly blocks someone who typed the right word.
+        const assignment = await withTimeout(Store.getHyperlinkAssignment(user.code), 4000, null);
         const correctWord = assignment?.word || assignedCandidate?.word || '';
         const wordCorrect = !!raw && !!correctWord && raw.toLowerCase() === correctWord.toLowerCase();
         const seconds = Math.round(elapsedMs / 1000);

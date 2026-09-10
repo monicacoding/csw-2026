@@ -806,10 +806,12 @@ const App = (() => {
   // may or may not return a promise — awaiting a non-promise is a no-op)
   // makes that failure visible instead, for any modal, not just this one.
   //
-  // `wide`: Hyperlink Race's mock docs site (sidebar + article side by
-  // side) needs more room than the standard 640px modal — see
-  // .sketch-modal--wide in css/sketch.css. Every other caller omits this
-  // and gets the normal width.
+  // `wide`: opts into a roomier modal (.sketch-modal--wide in
+  // css/sketch.css) for a render that needs more than the standard 640px —
+  // Hyperlink Race used this for its old sidebar+article layout; now that
+  // the sidebar's gone (a single-column article reads fine at the normal
+  // width) no current caller passes it, but the option's kept for whatever
+  // needs it next rather than removed and re-added later.
   async function openModal(renderFn, { wide = false } = {}) {
     modalLocked = false; // every new modal open starts unlocked, regardless of what the previous one was showing
     const modal = ensureModal();
@@ -912,7 +914,7 @@ const App = (() => {
       //    browse (and for Photo Finish, vote) during the active week.
       weekLocked,
       viewOnly: policy.mode === 'view',
-    }), { wide: activityId === 'hyperlinkRace' });
+    }));
   }
 
   // ---------------- Leaderboard ----------------

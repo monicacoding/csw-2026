@@ -938,17 +938,25 @@ a { color: inherit; text-decoration: none; cursor: none; }
    (the timer + Found It! button) so the *game* stays in the app's voice
    even while the *content* it's set inside doesn't.
 =========================================================================== */
+/* Not used by anything right now — Hyperlink Race dropped its sidebar (see
+   the comment on .hr-toolbar below), which was the reason its modal needed
+   more than the standard 640px. Left in place, and `openModal`'s `wide`
+   option along with it (js/app.js), for whatever future render needs a
+   roomier modal rather than removed and re-added later. */
 .sketch-modal--wide { max-width: 920px; }
 
 /* Sticky within the modal's own scroll container (.sketch-modal has
-   overflow-y:auto — see the modal rules earlier in this file) so the timer
-   and Found It! stay visible no matter how far into a long article the
-   player has scrolled, the same "always-visible while browsing" promise
-   the old real-second-tab version got for free just by living outside the
-   modal entirely. */
+   overflow-y:auto — see the modal rules earlier in this file) so the whole
+   toolbar — timer, Back, Found It!, and the visited-pages trail — stays
+   visible no matter how far into a long article the player has scrolled,
+   the same "always-visible while browsing" promise the old real-second-tab
+   version got for free just by living outside the modal entirely. Three
+   stacked rows rather than the single row this used to be: the pinned
+   start/goal reminder, the timer+Back+Found It! controls, then the trail —
+   each doing one job, rather than cramming all of it onto one line. */
 .hr-toolbar {
   position: sticky; top: 0; z-index: 5;
-  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  display: flex; flex-direction: column; gap: 8px;
   background: var(--white);
   border: 2.5px solid var(--navy);
   border-radius: 16px;
@@ -956,7 +964,42 @@ a { color: inherit; text-decoration: none; cursor: none; }
   margin-bottom: 16px;
   filter: drop-shadow(3px 4px 0 rgba(29,53,87,0.15));
 }
+/* Pinned so the goal (and start) never has to be memorized — replaces the
+   old sidebar as the map, in effect: you always know where you're headed
+   even without a full page list to browse. */
+.hr-toolbar__goal {
+  font-family: var(--font-hand); font-size: 14px; color: var(--ink-soft);
+  line-height: 1.4;
+}
+.hr-toolbar__goal strong { color: var(--navy); }
+.hr-toolbar__goal-arrow { color: var(--ink-soft); opacity: 0.6; margin: 0 2px; }
+.hr-toolbar__row { display: flex; align-items: center; gap: 10px; }
 .hr-toolbar__timer { font-family: var(--font-display); font-size: 26px; color: var(--navy); }
+.hr-toolbar__row .doodle-btn { flex-shrink: 0; }
+.hr-toolbar__row .doodle-btn:disabled { opacity: 0.35; }
+/* The Found It! button should stay pinned to the row's far end regardless
+   of how short/long Back's own label or the timer's digits are. */
+.hr-toolbar__row #hrFound { margin-left: auto; }
+
+/* The trail of pages actually visited this run (js/games.js's
+   mockDocsTrailHTML) — replaces the old sidebar as the "how do I get back"
+   answer, but only shows where you've actually been, not the whole site.
+   Horizontally scrolling rather than wrapping so a long backtracking
+   session doesn't grow the sticky toolbar taller and taller. */
+.hr-toolbar__trail {
+  display: flex; align-items: center; gap: 2px;
+  overflow-x: auto; white-space: nowrap;
+  padding-top: 2px;
+}
+.mockdoc-trail__item {
+  font-size: 12px; color: var(--docs-link, #0969DA);
+  background: none; border: none; padding: 2px 2px;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex-shrink: 0;
+}
+.mockdoc-trail__item:not(:disabled):hover { text-decoration: underline; }
+.mockdoc-trail__item.is-current { color: var(--ink-soft); font-weight: 700; cursor: default; }
+.mockdoc-trail__sep { color: var(--ink-soft); opacity: 0.5; font-size: 12px; flex-shrink: 0; }
 
 .mockdoc {
   --docs-link: #0969DA;
@@ -972,26 +1015,6 @@ a { color: inherit; text-decoration: none; cursor: none; }
 .mockdoc-breadcrumb__sep { margin: 0 4px; opacity: 0.6; }
 .mockdoc-breadcrumb__current { color: var(--docs-text); font-weight: 600; }
 
-.mockdoc-layout { display: flex; align-items: flex-start; gap: 24px; }
-
-.mockdoc-toc {
-  flex: 0 0 190px;
-  border-right: 1px solid var(--docs-border);
-  padding-right: 16px;
-}
-.mockdoc-toc__section { margin-bottom: 14px; }
-.mockdoc-toc__heading {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-  color: var(--docs-text-soft); margin-bottom: 4px;
-}
-.mockdoc-toc__link {
-  display: block; font-size: 13px; line-height: 1.5;
-  color: var(--docs-link); padding: 2px 0;
-}
-.mockdoc-toc__link.is-current { color: var(--docs-text); font-weight: 700; }
-.mockdoc-toc__link:hover { text-decoration: underline; }
-
-.mockdoc-article { flex: 1 1 auto; min-width: 0; }
 .mockdoc-article__meta { font-size: 12.5px; color: var(--docs-text-soft); margin-bottom: 4px; }
 .mockdoc-article__title { font-family: var(--font-body); font-size: 24px; font-weight: 700; color: var(--docs-text); margin: 0 0 14px; }
 .mockdoc-article__p { font-size: 14.5px; line-height: 1.65; color: var(--docs-text); margin: 0 0 14px; }
@@ -1027,12 +1050,6 @@ a { color: inherit; text-decoration: none; cursor: none; }
   .track-hint { display: none; } /* the hover popover itself is desktop-only below 640px anyway — see .track-marker-popover */
   .lb-tabs { grid-template-columns: repeat(2, 1fr); }
   .sketch-modal { max-width: 92vw; padding: 26px; }
-
-  /* The sidebar+article two-column layout gets cramped well before phone
-     width — stack the TOC above the article instead of squeezing both. */
-  .mockdoc-layout { flex-direction: column; }
-  .mockdoc-toc { flex: none; width: 100%; border-right: none; border-bottom: 1px solid var(--docs-border); padding-right: 0; padding-bottom: 14px; margin-bottom: 4px; }
-  .mockdoc-toc__section { display: inline-block; margin-right: 18px; vertical-align: top; }
 }
 
 @media (max-width: 640px) {
@@ -1044,8 +1061,10 @@ a { color: inherit; text-decoration: none; cursor: none; }
   .canvas-main { padding: 84px 14px 48px; }
   .hub-hero { margin-bottom: 32px; gap: 8px; }
   .hr-toolbar { padding: 8px 12px; }
+  .hr-toolbar__goal { font-size: 12px; }
   .hr-toolbar__timer { font-size: 20px; }
   .hr-toolbar .doodle-btn.sm { padding: 8px 12px; font-size: 11px; }
+  .mockdoc-trail__item { max-width: 90px; }
   .hub-hero .doodle-tag { font-size: 16px; }
   .sketch-title.hub-hero__title { font-size: 22px; }
   .activities-title { margin-bottom: 16px; font-size: 22px; }
