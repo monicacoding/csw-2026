@@ -270,13 +270,25 @@ const Games = (() => {
       const s = Math.floor(ms / 1000);
       return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
     };
-    // Set up once, outside any render — each render below fully replaces
-    // body.innerHTML (including a fresh #hrTimer node), so this looks the
-    // element up fresh every tick rather than caching a now-detached one.
-    const timerInterval = setInterval(() => {
-      const el = body.querySelector('#hrTimer');
-      if (el) el.textContent = fmt(Date.now() - startTime);
-    }, 200);
+    // Reassignable (not const) — Found It! stops this while the word
+    // prompt is up, and backing out of that prompt (see renderSubmit's
+    // Back button) needs to start a fresh one rather than resume a
+    // cleared-and-now-stale interval id. `startTime` itself never resets,
+    // so the displayed time — and the elapsed time actually scored on
+    // submit — keeps counting through a cancel-and-return exactly like it
+    // would if Found It! had never been clicked.
+    let timerInterval = null;
+    function startTimerTick() {
+      clearInterval(timerInterval); // idempotent — harmless if already stopped
+      // Each render below fully replaces body.innerHTML (including a fresh
+      // #hrTimer node), so this looks the element up fresh every tick
+      // rather than caching a now-detached one.
+      timerInterval = setInterval(() => {
+        const el = body.querySelector('#hrTimer');
+        if (el) el.textContent = fmt(Date.now() - startTime);
+      }, 200);
+    }
+    startTimerTick();
 
     // Following an in-body link always pushes a new entry, even onto a page
     // already earlier in the trail (a genuine revisit, not a jump) — Back
@@ -384,7 +396,22 @@ const Games = (() => {
           <p style="color:var(--ink-soft);">You made it! What word was highlighted, just for you?</p>
           <div class="field"><label>Highlighted word</label><input id="hrWordAnswer" type="text" autocomplete="off" placeholder="Type the word…" /></div>
           <button class="doodle-btn navy" id="hrSubmit" style="width:100%;">Submit</button>
+          <button class="doodle-btn ghost" id="hrCancel" style="width:100%;margin-top:10px;">← Back to Article</button>
         </div>`;
+
+      // Not a submission attempt, not an exit from the session — just
+      // dismisses this prompt and returns to the same page (still the goal
+      // page; nothing in `history` changed while this was up) with the
+      // clock still running, so someone unsure of what they saw can
+      // recheck the highlighted word instead of guessing or being forced
+      // to submit blind. ctx.lock()'s modal-level lockout is untouched —
+      // this only ever moves between this activity's own two internal
+      // screens, never anywhere ctx.lock() didn't already allow.
+      body.querySelector('#hrCancel').addEventListener('click', () => {
+        startTimerTick();
+        phase = 'browsing';
+        render();
+      });
 
       body.querySelector('#hrSubmit').addEventListener('click', async (e) => {
         const raw = body.querySelector('#hrWordAnswer').value.trim();
