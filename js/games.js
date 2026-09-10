@@ -219,6 +219,14 @@ const Games = (() => {
     });
   }
 
+  // `entry.wordCorrect` is always true for anything submitted since the
+  // word-validation fix below — an incorrect word is rejected outright and
+  // never reaches Store.submitEntry at all any more (see runHyperlinkRace's
+  // submit handler). The `false` branch here only exists for entries
+  // written before that fix shipped, back when a wrong word still
+  // submitted successfully (at half score) instead of being rejected —
+  // left in place purely so those old rows still render sensibly rather
+  // than requiring a data migration.
   function hyperlinkResultMessage(entry) {
     if (!entry) return "✅ You've already completed the Hyperlink Race!";
     const seconds = Math.round((entry.elapsedMs || 0) / 1000);
@@ -452,8 +460,15 @@ const Games = (() => {
           Toast.show("📍 You're not on the destination page yet — keep exploring!", 'error');
           return;
         }
+        // No visible timer on the submit screen (renderSubmit doesn't render
+        // a #hrTimer element), so nothing left to tick — but deliberately
+        // NOT freezing `elapsedMs` here: a wrong-word guess on that screen
+        // sends the player right back to this same phase without touching
+        // `startTime`, so the clock (whatever `Date.now() - startTime` is at
+        // the moment of an actually-correct submission, computed below in
+        // the submit handler) keeps running underneath the whole time —
+        // "still on the clock" through however many wrong guesses it takes.
         clearInterval(timerInterval);
-        elapsedMs = Date.now() - startTime;
         phase = 'submitting';
         render();
       });
@@ -470,6 +485,12 @@ const Games = (() => {
           <button class="doodle-btn ghost" id="hrCancel" style="width:100%;margin-top:10px;">← Back to Article</button>
         </div>`;
 
+      const wordInput = body.querySelector('#hrWordAnswer');
+      // Clears whatever error styling a previous wrong guess left behind as
+      // soon as they start correcting it — same convention the login form
+      // uses for its own invalid-input border.
+      wordInput.addEventListener('input', () => { wordInput.style.borderColor = ''; });
+
       // Not a submission attempt, not an exit from the session — just
       // dismisses this prompt and returns to the same page (still the goal
       // page; nothing in `history` changed while this was up) with the
@@ -485,9 +506,9 @@ const Games = (() => {
       });
 
       body.querySelector('#hrSubmit').addEventListener('click', async (e) => {
-        const raw = body.querySelector('#hrWordAnswer').value.trim();
+        const raw = wordInput.value.trim();
         e.target.disabled = true;
-        e.target.textContent = 'Submitting…';
+        e.target.textContent = 'Checking…';
 
         // Validate against the durably-stored assignment rather than only
         // this session's in-memory copy — see Store.assignHyperlinkAnswer.
@@ -499,9 +520,34 @@ const Games = (() => {
         const assignment = await withTimeout(Store.getHyperlinkAssignment(user.code), 4000, null);
         const correctWord = assignment?.word || assignedCandidate?.word || '';
         const wordCorrect = !!raw && !!correctWord && raw.toLowerCase() === correctWord.toLowerCase();
+
+        // The actual gate: an incorrect (or empty) word is rejected outright
+        // — never scored, never submitted, never closes the modal. Re-enable
+        // the button and let them try again with no penalty beyond the time
+        // it costs, since `startTime` (and therefore the score computed
+        // below on an eventual correct submission) was never touched by
+        // this rejection. This is the fix for the word check not actually
+        // gating submission at all — a previous version computed
+        // `wordCorrect` but only used it to halve the score, and submitted
+        // (and called ctx.done()) unconditionally either way.
+        if (!wordCorrect) {
+          Toast.show("❌ Not quite — double-check the highlighted word and try again.", 'error');
+          wordInput.style.borderColor = 'var(--brick)';
+          wordInput.focus();
+          wordInput.select();
+          e.target.disabled = false;
+          e.target.textContent = 'Submit';
+          return;
+        }
+
+        // Only reached on an actually-correct word: compute the final
+        // elapsed time now, fresh, rather than trusting a value frozen back
+        // at the Found It! click — any wrong guesses before this one really
+        // did cost real time, since `startTime` never moved and nothing
+        // above stopped the clock.
+        elapsedMs = Date.now() - startTime;
         const seconds = Math.round(elapsedMs / 1000);
-        let score = Math.max(10, Math.floor(200 - seconds));
-        if (!wordCorrect) score = Math.floor(score / 2);
+        const score = Math.max(10, Math.floor(200 - seconds));
 
         await Store.submitEntry({
           collection: 'hyperlinkRaceEntries', code: user.code, bingoKey: 'hyperlinkRace',
@@ -511,7 +557,7 @@ const Games = (() => {
         // submission lands — clear it so a future login never mistakes
         // this finished run for one still in progress (see
         // resumeInProgressSession in js/app.js).
-        await Store.clearHyperlinkSession(user.code).catch((e) => console.warn('Could not clear Hyperlink Race session', e));
+        await Store.clearHyperlinkSession(user.code).catch((e2) => console.warn('Could not clear Hyperlink Race session', e2));
         ctx.done();
       });
     }

@@ -1137,17 +1137,54 @@ a { color: inherit; text-decoration: none; cursor: none; }
 }
 
 /* ===========================================================================
-   Responsive — tablet and mobile
+   Responsive — small laptop, tablet, and mobile
    Everything above this point was written desktop-first (fixed px values
-   throughout); these breakpoints retrofit it downward rather than
-   rewriting the whole file mobile-first. Two tiers:
-     - <=900px  (tablet / small laptop): trims outer spacing and oversized
-       type so nothing feels like a shrunk desktop layout.
+   throughout, tuned by eye against a large monitor); these breakpoints
+   retrofit it downward rather than rewriting the whole file mobile-first.
+   Three tiers, applied in this order so later (narrower) tiers correctly
+   win over earlier ones for any property both touch:
+     - <=1500px (13–14" laptop): the tier that was actually missing before —
+       the <=900px tier below was mislabeled "tablet / small laptop" in this
+       comment, but 900px is well under every common laptop's own resolution
+       (1366×768, 1440×900 included), so real laptop screens never triggered
+       ANY responsive rule at all and rendered the full desktop-scale
+       spacing/type, which reads as oversized/zoomed-in relative to a
+       13–14" panel's actual pixel density and viewport size. This tier
+       scales the hub's outer chrome (canvas padding, hero, track, section
+       spacing, activity cards) and shared modal padding/heading size down
+       by roughly 15–20% — not a full mobile-style layout change, just
+       bringing fixed values back in line with a genuinely smaller viewport.
+       Verified live at 1366×768 and 1440×900, not just by reading the
+       rules — both actually common 13–14" panel resolutions, not just one.
+     - <=900px  (tablet): trims outer spacing and oversized type further, on
+       top of the 1500px tier's own reductions.
      - <=640px  (phone): the real layout changes — stacked login, wrapping
        timeline, single-column grids, edge-to-edge modals. Verified live at
        375×812 (iPhone-class) and 768×1024 (tablet) widths, not just by
        reading the rules.
 =========================================================================== */
+@media (max-width: 1500px) {
+  .canvas-main { max-width: 1180px; padding: 48px 32px 64px; }
+  .hub-hero { margin-bottom: 34px; }
+  .hub-hero .doodle-tag { font-size: 21px; }
+  .sketch-title.hub-hero__title { font-size: 29px; }
+  .track-wrap { padding: 38px 28px; margin: 0 0 40px; }
+  .board-section { margin-bottom: 34px; }
+  .activities-title { margin-bottom: 18px; }
+  .activity-grid { gap: 16px; }
+  .activity-card { padding: 17px 15px; min-height: 158px; }
+  .activity-card__medal { width: 44px; height: 44px; }
+  .activity-card__medal svg { width: 22px; height: 22px; }
+  /* Shared with every modal header (game modals, leaderboard, bingo,
+     onboarding) — reducing it here, not just under .hub-hero__title above,
+     is what keeps modal content from feeling oversized on these screens
+     too, not only the hub page behind them. */
+  .sketch-title { font-size: 26px; }
+  .sketch-modal { padding: 26px; }
+  .doodle-btn { padding: 11px 22px; font-size: 13px; }
+  .game-explainer, .mg-explainer { font-size: 15px; }
+}
+
 @media (max-width: 900px) {
   .canvas-main { padding: 88px 24px 60px; }
   .hub-hero .doodle-tag { font-size: 20px; }
