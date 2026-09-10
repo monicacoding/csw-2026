@@ -468,12 +468,24 @@ a { color: inherit; text-decoration: none; cursor: none; }
    the marker — no persistent clutter on the hub. */
 .track-marker-popover {
   position: absolute;
-  bottom: 100%; left: 50%;
+  /* Always opens downward, for every day, no exceptions — this used to
+     default to opening upward with a JS-driven flip to downward when
+     there wasn't room above (see positionTrackPopover in js/app.js), but
+     that made the direction inconsistent day to day depending on how much
+     room happened to be above each marker. Anchoring from the marker's
+     bottom unconditionally is what makes it consistent; a popover tall
+     enough to reach the bottom of the viewport scrolls its own content
+     instead (max-height set inline by positionTrackPopover) rather than
+     flipping direction to avoid it. */
+  top: 100%; left: 50%;
   /* --popover-shift-x: set by js/app.js's positionTrackPopover when
      centered would push either edge past the viewport (Monday near the
-     left, Friday near the right) — 0px the rest of the time. */
-  transform: translateX(calc(-50% + var(--popover-shift-x, 0px))) translateY(-8px);
+     left, Friday near the right) — 0px the rest of the time. This is the
+     one piece of the old flip/collision logic that's unchanged — this fix
+     is about vertical direction only. */
+  transform: translateX(calc(-50% + var(--popover-shift-x, 0px))) translateY(8px);
   width: 250px;
+  overflow-y: auto;
   background: var(--white);
   border: 2px solid var(--navy);
   border-radius: 14px 16px 12px 15px / 15px 12px 16px 14px;
@@ -490,32 +502,16 @@ a { color: inherit; text-decoration: none; cursor: none; }
   opacity: 1;
   pointer-events: auto;
 }
+/* The arrow tail — points up at the marker, since the popover always sits
+   below it now. */
 .track-marker-popover::after,
 .track-marker-popover::before {
   content: '';
   position: absolute; left: 50%; transform: translateX(-50%);
   border: 6px solid transparent;
 }
-.track-marker-popover::after { top: 100%; border-top-color: var(--navy); }
-.track-marker-popover::before { top: calc(100% - 2.5px); border-top-color: var(--white); border-width: 5px; }
-
-/* Flipped open downward instead — set by positionTrackPopover when there
-   isn't enough room above the marker (e.g. Friday's 4-item popover used to
-   get clipped at the top of the viewport). Every offset mirrors: anchors
-   from the marker's bottom instead of its top, and the arrow tail points
-   up at the marker instead of down. */
-.track-marker-popover--flip-down {
-  bottom: auto; top: 100%;
-  transform: translateX(calc(-50% + var(--popover-shift-x, 0px))) translateY(8px);
-}
-.track-marker-popover--flip-down::after {
-  top: auto; bottom: 100%;
-  border-top-color: transparent; border-bottom-color: var(--navy);
-}
-.track-marker-popover--flip-down::before {
-  top: auto; bottom: calc(100% - 2.5px);
-  border-top-color: transparent; border-bottom-color: var(--white);
-}
+.track-marker-popover::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--navy); }
+.track-marker-popover::before { top: auto; bottom: calc(100% - 2.5px); border-top-color: transparent; border-bottom-color: var(--white); border-width: 5px; }
 .track-marker-popover__day { font-family: var(--font-hand); font-size: 16px; color: var(--navy); line-height: 1.2; }
 .track-marker-popover__theme { font-family: var(--font-hand); font-size: 14px; color: var(--ink-soft); margin-top: var(--space-1); }
 /* One row per activity that day (remote or on-site) — divider lines between
