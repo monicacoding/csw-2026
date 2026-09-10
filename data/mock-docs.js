@@ -13,26 +13,43 @@
 // about the page graph itself is hardcoded to "being the start" or "being
 // the goal" anywhere else.
 //
-// Graph shape: 18 pages. The guaranteed route is a 9-hop "spine" —
-// getting-started → omnichannel-setup → knowledge-base-authoring →
-// csat-surveys → reporting-analytics → inviting-teammates →
-// team-roles-permissions → case-routing → escalation-workflows →
-// sla-policies — verified (see the graph-shape check run against this
-// file) to also be the *shortest* route: every other page is either a
-// shallow decoy cluster (account-setup, ticketing-basics, macros,
-// webhooks, api-authentication, rate-limits, sandbox-environments) that
-// only ever links to each other or back to the first three spine pages
-// (never forward into the spine), or a page genuinely adjacent to the
-// goal (automation-rules) that's only reachable from deep inside the
-// spine itself — so nothing anywhere provides a shortcut. Several pages
-// deliberately loop backward (inviting-teammates all the way back to
-// getting-started; csat-surveys/reporting-analytics loop into each
-// other), so a wrong turn costs real backtracking, not just an instant
-// "oh, dead end" — see js/games.js's Back button and trail breadcrumb for
-// how expensive that mistake actually is to undo. Link text throughout
-// avoids naming the goal outright (no page links anywhere say "SLA" or
-// "Service Level Agreement" until the article itself), including the two
-// pages that lead into it.
+// Graph shape: 18 real docs pages (plus one hidden, non-maze bonus page —
+// see the Easter egg note below). The guaranteed shortest route is 5 hops
+// — getting-started → account-setup → ticketing-basics → case-routing →
+// escalation-workflows → sla-policies — verified (see the graph-shape
+// check run against this file) via BFS, not hand-traced. Deliberately
+// tuned toward "challenging, not frustrating": a first-round difficulty
+// pass overshot into a 9-hop spine with dense decoys and deep backward
+// loops, which read as more likely to frustrate a player into giving up
+// than to reward careful reading — this reworks the same 18 pages into a
+// shorter guaranteed path (5 hops, comfortably inside the intended 5–7
+// range) while still giving a real choice at nearly every step (2–3 links
+// per page, rarely one obvious "correct" one) and a second, only slightly
+// longer legitimate route (getting-started → omnichannel-setup →
+// knowledge-base-authoring → ticketing-basics → ... → sla-policies, 6
+// hops) rather than a single obvious trail. Wrong turns still cost real
+// backtracking — several decoy pages loop into each other rather than
+// dead-ending instantly (csat-surveys/reporting-analytics; case-routing/
+// team-roles-permissions/inviting-teammates) — but every decoy page keeps
+// at least one link back within a hop or two of the spine (e.g.
+// sandbox-environments → account-setup, webhooks → omnichannel-setup,
+// api-authentication → ticketing-basics), rather than the deep,
+// getting-started-spanning loops the previous version had, so a wrong
+// turn is recoverable without feeling lost. Link text throughout avoids
+// naming the goal outright (no page links anywhere say "SLA" or "Service
+// Level Agreement" until the article itself), including the one page that
+// leads into it.
+//
+// Easter eggs: two small, optional, non-functional surprises for players
+// who wander off the direct path — neither affects scoring or progress.
+// (1) A one-line joke aside buried in `rate-limits`' body, easy to skim
+// past. (2) A genuinely hidden bonus page (`literal-sandbox`, not counted
+// among the 18 real docs pages and never a Found It! target) reachable
+// only via one unlikely, easy-to-miss link inside `sandbox-environments`
+// — a literal payoff on the "sandbox environment" pun. It's a dead end by
+// design (one link back to where it came from, nothing forward into the
+// maze), separate from the existing secret mini-game Easter egg elsewhere
+// in the app.
 // ---------------------------------------------------------------------------
 
 const MOCKDOCS_START_PAGE_ID = 'getting-started';
@@ -48,11 +65,11 @@ const MOCKDOCS_PAGES = {
     category: 'Getting Started',
     lastUpdated: 'September 2, 2026',
     readMinutes: 3,
-    links: ['account-setup', 'ticketing-basics', 'omnichannel-setup'],
+    links: ['account-setup', 'omnichannel-setup'],
     body: [
       `Meridian CX is a helpdesk platform for teams that handle a high volume of customer conversations across email, chat, and voice. This article is the starting point for new workspace admins — it covers what to set up first and links out to the deeper articles for each area.`,
       `Before anything else, finish ${mdLink('account-setup', 'setting up your workspace account')} — your workspace's timezone and business hours affect almost everything downstream.`,
-      `Once your account is configured, most teams move on to ${mdLink('ticketing-basics', 'ticketing basics')} to learn how cases flow through the system, or straight to ${mdLink('omnichannel-setup', 'omnichannel setup')} if email, chat, and voice all need to be live on day one.`,
+      `If your account's already configured and you're ready to get channels live, jump straight to ${mdLink('omnichannel-setup', 'omnichannel setup')} — email, chat, and voice can all be turned on the same day.`,
     ],
   },
 
@@ -87,11 +104,10 @@ const MOCKDOCS_PAGES = {
     category: 'Getting Started',
     lastUpdated: 'August 20, 2026',
     readMinutes: 2,
-    links: ['team-roles-permissions', 'reporting-analytics', 'getting-started'],
+    links: ['team-roles-permissions', 'reporting-analytics'],
     body: [
       `Invitations are sent from Workspace Settings → People → Invite, either one at a time or by pasting a list of email addresses. Each invite requires picking a role up front — see ${mdLink('team-roles-permissions', 'team roles and permissions')} for what each one can access.`,
       `Invited teammates show up as "Pending" until they accept, and pending seats still count against your plan's seat limit. Once someone's accepted and started working cases, their activity feeds into ${mdLink('reporting-analytics', 'reporting and analytics')} the same as anyone else's — there's no separate onboarding period where their numbers are excluded.`,
-      `New to Meridian CX yourself, or just want the full orientation again before you start inviting people? ${mdLink('getting-started', 'Start from the top')} — it links out to everything else from there.`,
     ],
   },
 
@@ -100,11 +116,11 @@ const MOCKDOCS_PAGES = {
     category: 'Tickets & Routing',
     lastUpdated: 'September 1, 2026',
     readMinutes: 4,
-    links: ['macros', 'api-authentication', 'knowledge-base-authoring'],
+    links: ['macros', 'api-authentication', 'case-routing'],
     body: [
       `Every customer message that comes in — email, chat, or voice — becomes a case. A case moves through four statuses: New, Open, Pending (waiting on the customer), and Resolved. Reopening a resolved case is always possible and doesn't create a duplicate.`,
       `Most agents don't type full replies from scratch for common questions — ${mdLink('macros', 'macros')} let you insert a pre-written response (with placeholders for the customer's name, case number, and so on) in one click, then edit it before sending.`,
-      `After a case is resolved, agents are encouraged to link out to relevant ${mdLink('knowledge-base-authoring', 'knowledge base articles')} rather than re-explaining the same fix by hand every time. If you're building anything that touches cases programmatically, you'll eventually need ${mdLink('api-authentication', 'API access')} of your own too.`,
+      `Once a case is created, what happens to it next — which queue it lands in, who (if anyone) it's auto-assigned to — is governed by ${mdLink('case-routing', 'case routing')}. If you're building anything that touches cases programmatically instead, you'll eventually need ${mdLink('api-authentication', 'API access')} of your own too.`,
     ],
   },
 
@@ -138,10 +154,10 @@ const MOCKDOCS_PAGES = {
     category: 'Automation',
     lastUpdated: 'September 3, 2026',
     readMinutes: 5,
-    links: ['sla-policies', 'case-routing', 'escalation-workflows'],
+    links: ['case-routing', 'escalation-workflows'],
     body: [
       `An automation rule is a trigger, an optional set of conditions, and one or more actions — for example, "when a case is tagged billing AND the customer is on the Enterprise tier, THEN assign it to the Billing queue and set priority to High." Rules run in the order they're listed, and a case can match more than one.`,
-      `Rules interact constantly with ${mdLink('case-routing', 'case routing')} and ${mdLink('escalation-workflows', 'escalation workflows')} in practice: a rule that changes a case's tags or tier mid-flight can cause it to start matching a different set of ${mdLink('sla-policies', "response-time commitments")} than the one it started under, which is worth testing deliberately rather than discovering by accident.`,
+      `Rules interact constantly with ${mdLink('case-routing', 'case routing')} and ${mdLink('escalation-workflows', 'escalation workflows')} in practice: a rule that changes a case's tags or tier mid-flight can cause it to start matching a different policy than the one it started under, which is worth testing deliberately rather than discovering by accident.`,
     ],
   },
 
@@ -274,7 +290,7 @@ const MOCKDOCS_PAGES = {
     readMinutes: 2,
     links: ['api-authentication', 'sandbox-environments', 'webhooks'],
     body: [
-      `The API allows 300 requests per minute per key on the standard plan, returned in the X-RateLimit-Remaining response header on every call so you can back off before hitting the limit rather than after. Exceeding it returns a 429 with a Retry-After header.`,
+      `The API allows 300 requests per minute per key on the standard plan, returned in the X-RateLimit-Remaining response header on every call so you can back off before hitting the limit rather than after. Exceeding it returns a 429 with a Retry-After header. (One support ticket asked, in complete sincerity, whether 429 was a ZIP code. It is not.)`,
       `Rate limits apply per ${mdLink('api-authentication', 'API key')}, not per workspace, so splitting a high-volume integration across two scoped keys is a legitimate way to raise your effective ceiling. A ${mdLink('sandbox-environments', 'sandbox')} key shares the same limit as a production key of the same scope. Webhook deliveries count against this too, for what it's worth — see ${mdLink('webhooks', 'webhooks')} if that's news to you.`,
     ],
   },
@@ -284,11 +300,28 @@ const MOCKDOCS_PAGES = {
     category: 'Developer',
     lastUpdated: 'July 22, 2026',
     readMinutes: 3,
-    links: ['api-authentication', 'rate-limits', 'account-setup'],
+    links: ['api-authentication', 'rate-limits', 'account-setup', 'literal-sandbox'],
     body: [
       `A sandbox is a full copy of your workspace's configuration — routing rules, SLA policies, macros — with none of the real case data. It's the recommended place to test a new automation rule or integration before it touches anything customer-facing.`,
       `Sandbox and production each need their own ${mdLink('api-authentication', 'API key')}, since keys are workspace-scoped and a sandbox is technically a separate workspace under the hood. They also share the same ${mdLink('rate-limits', 'rate limit')} rules, so load-testing against a sandbox is a reasonable way to find out how an integration behaves near its ceiling.`,
-      `Haven't been through the basics yet? ${mdLink('account-setup', 'Account setup')} is worth doing first — a sandbox inherits your workspace's configuration, so it helps to have one to inherit.`,
+      `Haven't been through the basics yet? ${mdLink('account-setup', 'Account setup')} is worth doing first — a sandbox inherits your workspace's configuration, so it helps to have one to inherit. (And if the name's had you picturing an actual sandbox this whole time, ${mdLink('literal-sandbox', "you're not entirely wrong")}.)`,
+    ],
+  },
+
+  // Hidden bonus page — not one of the 18 real docs pages, never a Found
+  // It! target, and never linked from anywhere except the one aside above.
+  // Purely a fun discovery for a curious reader; see the header comment's
+  // Easter egg note.
+  'literal-sandbox': {
+    title: '🏖️ The Literal Sandbox (Not That Kind)',
+    category: 'Developer',
+    lastUpdated: 'April 1, 2026',
+    readMinutes: 1,
+    links: ['sandbox-environments'],
+    body: [
+      `You found it. This isn't a real docs page — someone on the writing team apparently found "sandbox environment" too good a name to leave alone, and there is, as a matter of fact, an actual sandbox in the break room. It has a rake. It has one (1) plastic shovel, slightly cracked. Nobody remembers whose idea this was.`,
+      `There is no API for it. It is not covered by the standard rate limit. Load-testing it is discouraged and, frankly, unnecessary.`,
+      `That's the whole page. Nicely spotted — now go finish the actual hunt. ${mdLink('sandbox-environments', 'Back to the (metaphorical) sandbox')}.`,
     ],
   },
 };
