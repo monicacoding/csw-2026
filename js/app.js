@@ -643,43 +643,50 @@ const App = (() => {
     card.classList.add('show');
   }
 
-  // Standard flip/collision handling for the hover popover, run fresh on
-  // every hover (mouseenter/focus, not mouseover — see the caller) rather
-  // than once at render time, since a marker's available space depends on
-  // the current viewport size, not anything that changes when the track
-  // itself re-renders. The popover stays permanently laid out at
-  // opacity:0 (never display:none — see the CSS), so its real dimensions
-  // are measurable via getBoundingClientRect() even while hidden.
+  // Positioning for the hover popover, run fresh on every hover
+  // (mouseenter/focus, not mouseover — see the caller) rather than once at
+  // render time, since a marker's available space depends on the current
+  // viewport size, not anything that changes when the track itself
+  // re-renders. The popover stays permanently laid out at opacity:0 (never
+  // display:none — see the CSS), so its real dimensions are measurable via
+  // getBoundingClientRect() even while hidden.
   //
-  // Vertical: defaults to opening upward (bottom:100% of the marker, the
-  // original behavior) and flips to open downward only if there's less
-  // room above than the popover actually needs — e.g. Friday's 4-item
-  // popover no longer gets clipped at the top of the viewport.
+  // Vertical: always opens downward now, for every day, no exceptions —
+  // there used to be a flip to open upward when there was more room above
+  // than below, which made the direction inconsistent from one day to the
+  // next depending on where that day's marker happened to sit. A popover
+  // tall enough that it would run past the bottom of the viewport gets a
+  // measured `max-height` instead (paired with the CSS's own
+  // `overflow-y: auto`), so its own content scrolls rather than the
+  // popover ever flipping direction to dodge the edge.
   //
-  // Horizontal: defaults to centered on the marker and shifts only enough
-  // to keep both edges inside the viewport (with a small margin) — e.g.
-  // Monday near the left edge, Friday near the right. The shift is applied
-  // as a CSS custom property added on top of the existing translateX(-50%)
-  // centering, so the arrow tail (positioned independently, relative to
-  // the popover's own box) can drift slightly off dead-center when a
-  // popover is clamped against an edge — an accepted tradeoff for keeping
-  // the whole box on-screen, the same one most popover libraries make.
+  // Horizontal: unchanged from before — defaults to centered on the marker
+  // and shifts only enough to keep both edges inside the viewport (with a
+  // small margin), e.g. Monday near the left edge, Friday near the right.
+  // The shift is applied as a CSS custom property added on top of the
+  // existing translateX(-50%) centering, so the arrow tail (positioned
+  // independently, relative to the popover's own box) can drift slightly
+  // off dead-center when a popover is clamped against an edge — an
+  // accepted tradeoff for keeping the whole box on-screen, the same one
+  // most popover libraries make.
   function positionTrackPopover(markerEl) {
     const popover = markerEl.querySelector('.track-marker-popover');
     if (!popover) return;
-    // Reset before measuring so a stale flip/shift from a previous hover
+    // Reset before measuring so a stale shift/height from a previous hover
     // (e.g. after a window resize) can't affect this measurement.
-    popover.classList.remove('track-marker-popover--flip-down');
     popover.style.removeProperty('--popover-shift-x');
+    popover.style.removeProperty('max-height');
 
     const margin = 12; // minimum gap kept from the viewport edge
     const markerRect = markerEl.getBoundingClientRect();
+
+    // However much room is actually below the marker, floored so a very
+    // cramped viewport still gets a usable (if scrollable) popover rather
+    // than one squashed down to nothing.
+    const availableBelow = window.innerHeight - markerRect.bottom - margin;
+    popover.style.setProperty('max-height', `${Math.max(120, availableBelow)}px`);
+
     const popRect = popover.getBoundingClientRect();
-
-    if (markerRect.top < popRect.height + margin) {
-      popover.classList.add('track-marker-popover--flip-down');
-    }
-
     const naturalLeft = markerRect.left + markerRect.width / 2 - popRect.width / 2;
     const naturalRight = naturalLeft + popRect.width;
     let shiftX = 0;
@@ -705,9 +712,10 @@ const App = (() => {
     }).join('');
     // Tap-to-reveal on mobile (no :hover to rely on) — desktop keeps its
     // existing hover behavior (dayPopoverHTML/.track-marker-popover above,
-    // shown purely via CSS :hover), just with real flip/collision handling
-    // now (see positionTrackPopover) instead of always opening upward and
-    // centered regardless of how close the marker is to a viewport edge.
+    // shown purely via CSS :hover), just with real edge-aware positioning
+    // now (see positionTrackPopover): always opens downward, consistently,
+    // and shifts horizontally to stay on-screen near either edge, instead
+    // of always centering regardless of how close the marker is to one.
     if (window.isMobileViewport && window.isMobileViewport()) {
       [...markers.children].forEach((markerEl, i) => {
         markerEl.addEventListener('click', (e) => {
