@@ -1137,7 +1137,7 @@ const App = (() => {
     { key: 'hyperlinkRaceEntries', label: 'Hyperlink Race' },
     { key: 'snapJudgementEntries', label: 'Snap Judgement' },
     { key: 'triviaEntries', label: 'Race Day Trivia' },
-    { key: 'photoFinishEntries', label: 'Photo Finish (votes)' },
+    { key: 'photoFinishEntries', label: 'Photo Finish' },
   ];
   // Shown only to a user who has actually played the secret mini-game (see
   // visibleBoards below) — undiscovered players don't get a hint that this
