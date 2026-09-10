@@ -117,6 +117,7 @@ const App = (() => {
     if (code) {
       currentUser = await Store.getOrCreateUser(code);
       showHub();
+      maybeShowOnboarding();
     } else {
       showLogin();
     }
@@ -205,6 +206,7 @@ const App = (() => {
 
         Auth.setCurrentCode(code);
         showHub();
+        maybeShowOnboarding();
       } catch (err) {
         console.error(err);
         btn.disabled = false;
@@ -214,6 +216,61 @@ const App = (() => {
     };
 
     document.getElementById('forgotPinBtn').onclick = () => openForgotPinFlow();
+  }
+
+  // ---------------- Onboarding ----------------
+  // Shown automatically right after a successful login (see
+  // maybeShowOnboarding's two call sites — App.init's auto-continued-
+  // session path, and the login form's own submit handler) unless this
+  // user has previously dismissed it with "Don't show this again" checked.
+  // Nothing suppresses it just from having been closed once without that
+  // box checked — closing it any other way (✕, backdrop click, or the Got
+  // It button on its own) means it's back next login, which is the whole
+  // point of the checkbox actually mattering. Also reachable any time,
+  // regardless of that dismissed state, via the help icon in the player
+  // badge (see renderPlayerBadge) — same content, same modal, just a
+  // different reason it opened.
+  //
+  // Deliberately says nothing about the secret mini-game/easter egg —
+  // that stays a find-it-yourself surprise, not something the welcome
+  // tour spoils for every new player on day one.
+  function renderOnboardingContent(body) {
+    body.innerHTML = `
+      <h2 class="sketch-title" style="text-align:center;width:100%;">Welcome to the Extra Mile Hub! 🏁</h2>
+      <div class="game-explainer" style="margin-top:10px;">
+        <p>🏎️ <span>This is home base for <strong>Customer Service Week</strong> — a week of quick activities, trivia, and a little friendly competition, all under the theme "We Go the Extra Mile."</span></p>
+        <p>📅 <span>Each activity <strong>unlocks on its own day</strong> and stays open only until its <strong>deadline</strong> — once that passes, it's closed for good, so don't let one slip by.</span></p>
+        <p>☝️ <span>Most activities are <strong>one-and-done</strong> — once you submit, that's your entry, no retries. Rules and mechanics vary activity to activity, so give each one's own instructions a proper read before you dive in.</span></p>
+        <p>🎯 <span>Track your progress across the week on your <strong>Bingo Card</strong>.</span></p>
+        <p>🏆 <span>Check the <strong>Leaderboard</strong> any time to see how you stack up.</span></p>
+        <p>🏁 <span>Once the week wraps up, everything switches to <strong>view-only</strong> — you can still log in and see your results, but nothing can be played anymore.</span></p>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin:16px 0 18px;font-family:var(--font-hand);font-size:15px;color:var(--ink-soft);cursor:pointer;">
+        <input type="checkbox" id="onboardDontShow" ${currentUser.onboardingDismissed ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--navy);" />
+        Don't show this again
+      </label>
+      <button class="doodle-btn" id="onboardGotIt" style="width:100%;">Got It — Let's Go!</button>
+    `;
+    // Persisted immediately on toggle, not deferred until the modal
+    // closes — see Store.setOnboardingDismissed's own comment for why:
+    // this modal has several ways to close (✕, backdrop, the button below)
+    // and all of them need to respect whatever the checkbox's last state
+    // was, without needing a dedicated close hook for each.
+    body.querySelector('#onboardDontShow').addEventListener('change', (e) => {
+      const dismissed = e.target.checked;
+      currentUser.onboardingDismissed = dismissed; // update the in-memory copy too, so a same-session reopen reflects it immediately
+      Store.setOnboardingDismissed(currentUser.code, dismissed)
+        .catch((err) => console.warn('Could not save onboarding preference', err));
+    });
+    body.querySelector('#onboardGotIt').addEventListener('click', () => closeModal());
+  }
+
+  function openOnboardingModal() {
+    openModal((body) => renderOnboardingContent(body));
+  }
+
+  function maybeShowOnboarding() {
+    if (!currentUser.onboardingDismissed) openOnboardingModal();
   }
 
   // ---------------- Forgot PIN ----------------
@@ -435,9 +492,14 @@ const App = (() => {
     // choice (that's what the picker's own highlighted option is for).
     badge.innerHTML = `
       <button class="player-badge__avatar" id="avatarBtn" title="${currentUser.code} — click to change your cursor">${Icons.cursor}</button>
+      <button class="player-badge__help" id="helpBtn" title="Help">?</button>
       <button class="player-badge__exit" id="exitBtn" title="Log out">✕</button>
     `;
     badge.querySelector('#avatarBtn').addEventListener('click', () => CursorPicker.toggle());
+    // Reopens the same welcome content on demand, regardless of whether
+    // this user already dismissed the auto-show version — see
+    // openOnboardingModal's own comment.
+    badge.querySelector('#helpBtn').addEventListener('click', () => openOnboardingModal());
     badge.querySelector('#exitBtn').addEventListener('click', () => {
       Auth.logOut();
       currentUser = null;
@@ -1136,7 +1198,7 @@ const App = (() => {
     }
   }
 
-  return { init, openActivityModal, openLeaderboardModal, openBingoModal, openSecretLeaderboard };
+  return { init, openActivityModal, openLeaderboardModal, openBingoModal, openSecretLeaderboard, openOnboardingModal };
 })();
 window.App = App;
 

@@ -61,6 +61,11 @@ const Store = (() => {
       finishLineSeenAt: null,
       easterEgg: { found: false, foundAt: null, minigameHighScore: 0 },
       cursorGlyph: '🏎️',
+      // See App.maybeShowOnboarding/openOnboardingModal — false (or, for
+      // any user created before this field existed, simply absent, which
+      // reads exactly as falsy) means "hasn't dismissed it with 'don't
+      // show again' checked," so it keeps auto-showing on login.
+      onboardingDismissed: false,
     };
     await FirestoreDB.setDoc('users', code, fresh, false);
     return { id: code, ...fresh };
@@ -85,6 +90,7 @@ const Store = (() => {
       finishLineSeenAt: null,
       easterEgg: { found: false, foundAt: null, minigameHighScore: 0 },
       cursorGlyph: '🏎️',
+      onboardingDismissed: false,
       pinHash,
       pinDigitHashes,
       pinResetAttempts: 0,
@@ -307,6 +313,16 @@ const Store = (() => {
     await FirestoreDB.setDoc('users', code, { cursorGlyph: glyph }, true);
   }
 
+  // The onboarding modal's "Don't show this again" checkbox (see
+  // App.renderOnboardingContent) — written the moment the checkbox is
+  // toggled, not deferred until the modal is actually dismissed, so
+  // whatever it's set to always reflects reality by the time the modal
+  // closes regardless of which of its several close paths (✕, backdrop
+  // click, the Got It button) the user ends up using.
+  async function setOnboardingDismissed(code, dismissed) {
+    await FirestoreDB.setDoc('users', code, { onboardingDismissed: dismissed }, true);
+  }
+
   // ---- Dev-only: reset one user's own test data ---------------------------
   // Reachable only from the Developer Mode panel's Reset button (behind
   // js/app.js's DEV_MODE flag — see that file). Deliberately scoped to a
@@ -343,6 +359,9 @@ const Store = (() => {
       finishLineSeenAt: null,
       easterEgg: { found: false, foundAt: null, minigameHighScore: 0 },
       cursorGlyph: '🏎️',
+      // "Fresh account" includes re-triggering onboarding on next login —
+      // consistent with everything else this resets.
+      onboardingDismissed: false,
     };
     await FirestoreDB.setDoc('users', code, fresh, false); // false = full overwrite, not merge — must actually clear stale fields (PIN included), not just patch over them
 
@@ -384,6 +403,7 @@ const Store = (() => {
     markEasterEggFound,
     markFinishLineSeen,
     setCursorGlyph,
+    setOnboardingDismissed,
     resetUserProgress,
     emptyBingo,
   };
