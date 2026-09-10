@@ -764,13 +764,30 @@ const App = (() => {
     }
     return modal;
   }
-  function openModal(renderFn) {
+  // renderFn is trusted to overwrite body.innerHTML itself (most do, right
+  // away) — but several are async and fetch before rendering anything
+  // (checking Store.hasSubmitted, loading a Gallery/leaderboard, etc.). If
+  // that fetch throws — as every list-style read did until the
+  // firestore.rules `list` gap was fixed (get vs. list — see that file's
+  // comment) — an unhandled rejection used to leave body showing whatever
+  // the *previous* openModal call had rendered, which read as "this opened
+  // the wrong modal" when it was really the same modal quietly failing to
+  // update. Clearing body up front and catching a failed renderFn here (it
+  // may or may not return a promise — awaiting a non-promise is a no-op)
+  // makes that failure visible instead, for any modal, not just this one.
+  async function openModal(renderFn) {
     modalLocked = false; // every new modal open starts unlocked, regardless of what the previous one was showing
     const modal = ensureModal();
     modal.style.display = 'flex';
     modal.querySelector('#genericModalClose').style.display = '';
     const body = modal.querySelector('#genericModalBody');
-    renderFn(body);
+    body.innerHTML = '';
+    try {
+      await renderFn(body);
+    } catch (err) {
+      console.error('Modal failed to load:', err);
+      body.innerHTML = `<p style="text-align:center;color:var(--brick);font-weight:700;">⚠️ Something went wrong loading this — please try again.</p>`;
+    }
   }
   function closeModal() {
     modalLocked = false;
@@ -818,7 +835,13 @@ const App = (() => {
       return;
     }
 
-    openModal((body) => {
+    // The expression-bodied arrow (no braces) matters here — it returns
+    // fn(...)'s promise from the renderFn openModal receives, rather than
+    // discarding it. openModal awaits that below to catch a failed fetch
+    // inside fn (e.g. a Photo Finish/Nomination view failing to load its
+    // Gallery/Wall) instead of leaving whatever the modal happened to be
+    // showing last silently on screen.
+    openModal((body) => fn(body, currentUser, day, {
       // Two ways an activity can hand control back:
       //  - done(): the usual case — submission is final, close the modal and
       //    bounce back to the hub with a toast (Hyperlink Race, Snap
@@ -827,35 +850,33 @@ const App = (() => {
       //    should update in the background, but the modal stays open so the
       //    activity can show a post-submit view in place (Photo Finish's
       //    Gallery, the nomination's Recognition Wall).
-      fn(body, currentUser, day, {
-        done: async () => {
-          await refreshUser();
-          closeModal(); // always unlocks too — see closeModal
-          showHub();
-          Toast.show('🏁 Nice work — logged!', 'success');
-        },
-        refresh: async () => {
-          await refreshUser();
-          showHub();
-        },
-        // Cheating-risk activities (Hyperlink Race, Snap Judgement, Race Day
-        // Trivia) call lock() the moment a session actually starts. There's
-        // no unlock()/quit() exposed to them — see the note on modalLocked
-        // above; done() (above) is the only way this ever unlocks again.
-        lock: () => setModalLocked(true),
-        // Read by Photo Finish/Nomination (js/games.js) to decide what's
-        // still allowed inside the modal once it's open:
-        //  - weekLocked: the global end-of-week switch — true here only
-        //    when policy.mode === 'done' (every other case would already
-        //    have been blocked above), so it means "show this read-only,
-        //    no more voting/submitting," never "block opening at all."
-        //  - viewOnly: the Photo Finish/Nomination browse-only carve-out —
-        //    deadline passed, this user never submitted, but they can still
-        //    browse (and for Photo Finish, vote) during the active week.
-        weekLocked,
-        viewOnly: policy.mode === 'view',
-      });
-    });
+      done: async () => {
+        await refreshUser();
+        closeModal(); // always unlocks too — see closeModal
+        showHub();
+        Toast.show('🏁 Nice work — logged!', 'success');
+      },
+      refresh: async () => {
+        await refreshUser();
+        showHub();
+      },
+      // Cheating-risk activities (Hyperlink Race, Snap Judgement, Race Day
+      // Trivia) call lock() the moment a session actually starts. There's
+      // no unlock()/quit() exposed to them — see the note on modalLocked
+      // above; done() (above) is the only way this ever unlocks again.
+      lock: () => setModalLocked(true),
+      // Read by Photo Finish/Nomination (js/games.js) to decide what's
+      // still allowed inside the modal once it's open:
+      //  - weekLocked: the global end-of-week switch — true here only
+      //    when policy.mode === 'done' (every other case would already
+      //    have been blocked above), so it means "show this read-only,
+      //    no more voting/submitting," never "block opening at all."
+      //  - viewOnly: the Photo Finish/Nomination browse-only carve-out —
+      //    deadline passed, this user never submitted, but they can still
+      //    browse (and for Photo Finish, vote) during the active week.
+      weekLocked,
+      viewOnly: policy.mode === 'view',
+    }));
   }
 
   // ---------------- Leaderboard ----------------

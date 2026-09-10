@@ -6,24 +6,45 @@ rules_version = '2';
 // low-friction internal tool for one fun week, not a security boundary.
 // Paste into Firebase Console → Firestore → Rules, or deploy with:
 //   firebase deploy --only firestore:rules
+//
+// IMPORTANT — `allow read` is NOT one rule, it's shorthand for two:
+// `get` (fetching one document by ID, e.g. FirestoreDB.getDoc) and `list`
+// (querying a whole collection, e.g. FirestoreDB.listCollection — every
+// leaderboard, the Photo Finish Gallery, the Recognition Wall all go
+// through this). A condition written against the path wildcard (`code` in
+// `match /users/{code}`) only has a real value for `get` — a `list`
+// request targets the collection, not one document, so `code` is unbound
+// during list evaluation and any condition touching it denies the whole
+// query. That silently broke every list read in this app (confirmed live:
+// a GET on a known doc returned 200, a LIST on the same collection
+// returned 403 PERMISSION_DENIED) while every single-document get/write
+// kept working fine — which is why writes always "succeeded" but nothing
+// ever showed back up in a leaderboard/gallery/wall. `get`/`write` keep
+// the doc-ID format check (little real value since this isn't a security
+// boundary anyway, but cheap to keep); `list` is opened unconditionally,
+// consistent with this file's own stated non-security posture.
 // ---------------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
 
     match /users/{code} {
-      allow read, write: if code.matches('^[A-Z]{4}$');
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
     }
 
     match /hyperlinkRaceEntries/{code} {
-      allow read, write: if code.matches('^[A-Z]{4}$');
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
     }
 
     match /snapJudgementEntries/{code} {
-      allow read, write: if code.matches('^[A-Z]{4}$');
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
     }
 
     match /triviaEntries/{code} {
-      allow read, write: if code.matches('^[A-Z]{4}$');
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
 
       // Race Day Trivia runs daily now — each day's 5-question set is its
       // own doc in this subcollection (triviaEntries/{code}/days/{dayId} —
@@ -32,24 +53,29 @@ service cloud.firestore {
       // parent /triviaEntries/{code} document does not implicitly cover
       // its subcollections.
       match /days/{dayId} {
-        allow read, write: if code.matches('^[A-Z]{4}$');
+        allow get, write: if code.matches('^[A-Z]{4}$');
+        allow list: if true;
       }
     }
 
     match /photoFinishEntries/{code} {
-      allow read, write: if code.matches('^[A-Z]{4}$');
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
 
       match /votes/{voterCode} {
-        allow read, write: if voterCode.matches('^[A-Z]{4}$');
+        allow get, write: if voterCode.matches('^[A-Z]{4}$');
+        allow list: if true;
       }
     }
 
     match /nominations/{code} {
-      allow read, write: if code.matches('^[A-Z]{4}$');
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
     }
 
     match /minigameEntries/{code} {
-      allow read, write: if code.matches('^[A-Z]{4}$');
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
     }
 
     // Everything else stays locked down.
