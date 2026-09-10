@@ -190,11 +190,15 @@ a { color: inherit; text-decoration: none; cursor: none; }
 .cursor-picker-option:hover { transform: scale(1.08); border-color: var(--gold); }
 .cursor-picker-option.is-selected { background: var(--gold); border-color: var(--gold-dark); }
 
-/* preview-only day-jump strip, tucked under the badge */
-.preview-strip {
+/* Developer Mode panel — day-jump + Reset, tucked under the badge. Dev-only:
+   gated behind js/app.js's DEV_MODE flag, must not ship in the real-event
+   build. Brick border (rather than this app's usual navy) is deliberate —
+   it's the one UI element in the whole app meant to read as "caution, dev
+   tool," not as part of the actual player-facing experience. */
+.dev-mode-panel {
   position: fixed; top: 68px; right: 28px; z-index: 60;
   background: var(--gold); color: var(--navy);
-  border: 2.5px solid var(--navy);
+  border: 2.5px solid var(--brick);
   border-radius: var(--radius-md);
   padding: 8px 12px;
   font-size: 11px; font-weight: 800;
@@ -202,11 +206,20 @@ a { color: inherit; text-decoration: none; cursor: none; }
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   max-width: 230px;
 }
-.preview-strip button {
+.dev-mode-panel__label {
+  width: 100%;
+  font-weight: 900; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--brick); white-space: nowrap;
+  margin-bottom: 2px;
+}
+.dev-mode-panel button {
   background: rgba(29,53,87,0.14); border: none; border-radius: 999px;
   padding: 3px 8px; font-weight: 800; font-size: 10.5px; color: var(--navy);
 }
-.preview-strip button.is-active { background: var(--navy); color: var(--cream); }
+.dev-mode-panel button.is-active { background: var(--navy); color: var(--cream); }
+/* Reset stands apart from the day-selector pills (which stay exactly as
+   they were) — brick-filled so it visibly reads as the destructive one. */
+.dev-mode-panel button.dev-mode-panel__reset { background: var(--brick); color: var(--cream); }
 
 /* ===========================================================================
    Sketch card — hand-drawn border via layered offset pseudo-borders +
@@ -1040,7 +1053,7 @@ a { color: inherit; text-decoration: none; cursor: none; }
   /* Fixed corner widgets: still fixed, just tucked in tighter so a small
      viewport doesn't feel like it's losing real content space to them. */
   .player-badge { top: 12px; right: 12px; }
-  .preview-strip { top: 58px; right: 12px; max-width: 170px; font-size: 10px; }
+  .dev-mode-panel { top: 58px; right: 12px; max-width: 170px; font-size: 10px; }
   .utility-dock { bottom: 14px; left: 14px; }
   .utility-dock .doodle-btn.sm { padding: 8px 12px; font-size: 11px; }
   .track-mascot, #trackMascot.eggable { bottom: 14px; right: 14px; width: 72px; height: 72px; }

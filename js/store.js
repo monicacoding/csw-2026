@@ -307,6 +307,57 @@ const Store = (() => {
     await FirestoreDB.setDoc('users', code, { cursorGlyph: glyph }, true);
   }
 
+  // ---- Dev-only: reset one user's own test data ---------------------------
+  // Reachable only from the Developer Mode panel's Reset button (behind
+  // js/app.js's DEV_MODE flag — see that file). Deliberately scoped to a
+  // single user's own documents, never a whole-collection/whole-database
+  // wipe — see js/firestore-db.js's header comment for why a global reset
+  // was never brought back after this app left MockDB/localStorage: this is
+  // the real, shared Firestore project, and a one-click reset that could
+  // touch every tester's data would be genuinely destructive rather than
+  // just "start my own test over."
+  //
+  // Overwrites `users/{code}` back to the exact same fresh shape
+  // getOrCreateUser gives a brand-new code (no PIN — the next login treats
+  // this like a legacy no-PIN record and lets them set a new one, same path
+  // createUser already handles), and deletes every other doc this code owns
+  // across every collection: its own game entries, all 5 trivia days, and
+  // the Hyperlink Race answer assignment. Deleting a doc that was never
+  // created (e.g. an activity this user never played) is a no-op, not an
+  // error, so this doesn't need to check what actually exists first.
+  //
+  // Not touched, deliberately: any *other* user's documents — including
+  // photoFinishEntries/{otherCode}/votes/{code}, a vote this user may have
+  // cast on someone else's photo. Scrubbing that would mean writing into
+  // every other tester's own subcollection, which is a meaningfully
+  // different (and more invasive) operation than resetting your own
+  // account, and isn't attempted here.
+  async function resetUserProgress(code) {
+    const fresh = {
+      code,
+      createdAt: FirestoreDB.now(),
+      lastSeenAt: FirestoreDB.now(),
+      bingo: emptyBingo(),
+      totalScore: 0,
+      triviaTotalScore: 0,
+      finishLineSeenAt: null,
+      easterEgg: { found: false, foundAt: null, minigameHighScore: 0 },
+      cursorGlyph: '🏎️',
+    };
+    await FirestoreDB.setDoc('users', code, fresh, false); // false = full overwrite, not merge — must actually clear stale fields (PIN included), not just patch over them
+
+    const daysCollection = FirestoreDB.subPath('triviaEntries', code, 'days');
+    await Promise.all([
+      FirestoreDB.deleteDoc('hyperlinkRaceEntries', code),
+      FirestoreDB.deleteDoc('hyperlinkRaceProgress', code),
+      FirestoreDB.deleteDoc('snapJudgementEntries', code),
+      FirestoreDB.deleteDoc('photoFinishEntries', code),
+      FirestoreDB.deleteDoc('nominations', code),
+      FirestoreDB.deleteDoc('minigameEntries', code),
+      ...TRIVIA_DAY_IDS.map((dayId) => FirestoreDB.deleteDoc(daysCollection, dayId)),
+    ]);
+  }
+
   return {
     getOrCreateUser,
     getUser,
@@ -333,6 +384,7 @@ const Store = (() => {
     markEasterEggFound,
     markFinishLineSeen,
     setCursorGlyph,
+    resetUserProgress,
     emptyBingo,
   };
 })();

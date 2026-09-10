@@ -4,6 +4,17 @@
 // activity/leaderboard/secret view, and the finish-line celebration.
 // ---------------------------------------------------------------------------
 
+// ===========================================================================
+// DEV_MODE — gates the entire Developer Mode panel (renderDevModePanel,
+// below): the day-jump preview buttons and the Reset button. This flag, and
+// everything it guards, MUST NOT SHIP in the production/real-event build —
+// flip this single constant to false (or delete it and everything gated on
+// it) before that deploy. Kept as one obvious, greppable constant at the
+// very top of the file specifically so it's trivial to find later, rather
+// than buried inline where a future pass could miss it.
+// ===========================================================================
+const DEV_MODE = true;
+
 const Toast = (() => {
   let el = null;
   function ensure() {
@@ -398,7 +409,7 @@ const App = (() => {
     document.getElementById('appRoot').style.display = 'block';
     Cursor.setGlyph(currentUser.cursorGlyph || '🏎️');
     renderPlayerBadge();
-    renderPreviewStrip();
+    renderDevModePanel();
     renderWeekLockedBanner();
     renderTrack();
     renderTriviaSection();
@@ -431,49 +442,68 @@ const App = (() => {
       Auth.logOut();
       currentUser = null;
       document.getElementById('playerBadge')?.remove();
-      document.getElementById('previewStrip')?.remove();
+      document.getElementById('devModePanel')?.remove();
       CursorPicker.close();
       showLogin();
     });
   }
 
-  function renderPreviewStrip() {
-    let strip = document.getElementById('previewStrip');
-    if (!strip) {
-      strip = document.createElement('div');
-      strip.id = 'previewStrip';
-      strip.className = 'preview-strip';
-      document.body.appendChild(strip);
+  // The day-jump + Reset panel. Everything in this function is dev-only —
+  // see the DEV_MODE constant at the top of this file, which is the single
+  // switch that must flip to false (or have this whole panel deleted
+  // outright) before shipping the real event build. When it's off, this
+  // just tears down any panel a previous DEV_MODE=true render left behind
+  // and returns — nothing else in the hub depends on this panel existing.
+  function renderDevModePanel() {
+    if (!DEV_MODE) {
+      document.getElementById('devModePanel')?.remove();
+      return;
+    }
+
+    let panel = document.getElementById('devModePanel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'devModePanel';
+      panel.className = 'dev-mode-panel';
+      document.body.appendChild(panel);
     }
     const currentOverride = localStorage.getItem('csw2026_preview_date') || '';
     const dayBtns = CSW_SCHEDULE.map((d) =>
       `<button data-date="${d.date}" class="${d.date === currentOverride ? 'is-active' : ''}">${d.label.slice(0,3)}</button>`
     ).join('');
-    // One more jump: the day after the week's hard end date, so the new
-    // global view-only lockout (point 1 — see data/schedule.js's
-    // isWeekLocked) is actually reachable for testing, the same way the day
-    // buttons make each individual unlock reachable.
+    // One more jump: the day after the week's hard end date, so the global
+    // view-only lockout (see data/schedule.js's isWeekLocked) is actually
+    // reachable for testing, the same way the day buttons make each
+    // individual unlock reachable.
     const postWeekDate = addDaysToDateString(CSW_WEEK_END_DATE, 1);
-    // No "Reset" button anymore — it used to call MockDB.reset(), wiping
-    // the entire local mock database for quick testing. That was safe
-    // against a throwaway localStorage blob; against this real, shared
-    // Firestore project it would be a genuinely destructive "wipe
-    // everyone's data" button, so it was dropped rather than carried over
-    // (see js/firestore-db.js). "Real" here still just clears the day
-    // override, and the player badge's own ✕ still logs out — between the
-    // two, nothing non-destructive Reset did is actually missing.
-    strip.innerHTML = `
-      <span>🔧 PREVIEW —</span>
+    panel.innerHTML = `
+      <span class="dev-mode-panel__label">🛠️ Developer Mode</span>
       ${dayBtns}
       <button data-date="${postWeekDate}" class="${postWeekDate === currentOverride ? 'is-active' : ''}">Post-Week</button>
       <button data-date="">Real</button>
+      <button class="dev-mode-panel__reset" id="devResetBtn" title="Wipes YOUR OWN test data — submissions, scores, PIN, mini-game progress — back to a brand new account">⚠ Reset</button>
     `;
-    strip.querySelectorAll('button[data-date]').forEach((btn) => {
+    panel.querySelectorAll('button[data-date]').forEach((btn) => {
       btn.addEventListener('click', () => {
         if (btn.dataset.date) localStorage.setItem('csw2026_preview_date', btn.dataset.date);
         else localStorage.removeItem('csw2026_preview_date');
         showHub();
       });
+    });
+    // Destructive, so it's gated behind a real confirm() rather than firing
+    // on a single accidental click — see Store.resetUserProgress's own
+    // comment for exactly what this does and doesn't touch (this user's own
+    // documents only, never another tester's).
+    panel.querySelector('#devResetBtn').addEventListener('click', async () => {
+      const confirmed = confirm(
+        `Reset all test data for "${currentUser.code}"?\n\n` +
+        `This wipes YOUR OWN submissions, scores, PIN, mini-game progress, and the secret leaderboard unlock — back to a brand new account. This cannot be undone.`
+      );
+      if (!confirmed) return;
+      await Store.resetUserProgress(currentUser.code);
+      await refreshUser();
+      showHub();
+      Toast.show('🔄 Your test data has been reset.', 'success');
     });
   }
 

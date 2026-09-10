@@ -54,7 +54,7 @@ const CursorPicker = (() => {
   function position() {
     const avatarBtn = document.getElementById('avatarBtn');
     if (!avatarBtn) return;
-    const anchor = document.getElementById('previewStrip') || document.getElementById('playerBadge');
+    const anchor = document.getElementById('devModePanel') || document.getElementById('playerBadge');
     const rect = (anchor || avatarBtn).getBoundingClientRect();
     panel.style.top = `${rect.bottom + 10}px`;
     panel.style.right = '28px';
