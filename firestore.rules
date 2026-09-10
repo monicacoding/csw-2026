@@ -37,6 +37,16 @@ service cloud.firestore {
       allow list: if true;
     }
 
+    // The Hyperlink Race anti-sharing mechanism: the word assigned to each
+    // user on the goal page (Store.assignHyperlinkAnswer/getHyperlinkAssignment
+    // — see js/store.js). Separate from hyperlinkRaceEntries above since
+    // it's written mid-session (on reaching the goal page), before the
+    // actual submission happens.
+    match /hyperlinkRaceProgress/{code} {
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
+    }
+
     match /snapJudgementEntries/{code} {
       allow get, write: if code.matches('^[A-Z]{4}$');
       allow list: if true;

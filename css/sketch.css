@@ -917,6 +917,84 @@ a { color: inherit; text-decoration: none; cursor: none; }
 }
 
 /* ===========================================================================
+   Hyperlink Race — the mock docs site (data/mock-docs.js) + its persistent
+   toolbar. Deliberately breaks from the rest of the app's hand-drawn look:
+   this is meant to read as "you've stepped into a real, slightly dry docs
+   site" — clean sans-serif body copy, a muted Learn-blue for links, thin
+   hairline borders — framed by the still-doodle-styled toolbar above it
+   (the timer + Found It! button) so the *game* stays in the app's voice
+   even while the *content* it's set inside doesn't.
+=========================================================================== */
+.sketch-modal--wide { max-width: 920px; }
+
+/* Sticky within the modal's own scroll container (.sketch-modal has
+   overflow-y:auto — see the modal rules earlier in this file) so the timer
+   and Found It! stay visible no matter how far into a long article the
+   player has scrolled, the same "always-visible while browsing" promise
+   the old real-second-tab version got for free just by living outside the
+   modal entirely. */
+.hr-toolbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: var(--white);
+  border: 2.5px solid var(--navy);
+  border-radius: 16px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  filter: drop-shadow(3px 4px 0 rgba(29,53,87,0.15));
+}
+.hr-toolbar__timer { font-family: var(--font-display); font-size: 26px; color: var(--navy); }
+
+.mockdoc {
+  --docs-link: #0969DA;
+  --docs-border: #D9DEE3;
+  --docs-text: #24292F;
+  --docs-text-soft: #57606A;
+  font-family: var(--font-body);
+}
+.mockdoc-breadcrumb {
+  font-size: 13px; color: var(--docs-text-soft);
+  margin-bottom: 14px;
+}
+.mockdoc-breadcrumb__sep { margin: 0 4px; opacity: 0.6; }
+.mockdoc-breadcrumb__current { color: var(--docs-text); font-weight: 600; }
+
+.mockdoc-layout { display: flex; align-items: flex-start; gap: 24px; }
+
+.mockdoc-toc {
+  flex: 0 0 190px;
+  border-right: 1px solid var(--docs-border);
+  padding-right: 16px;
+}
+.mockdoc-toc__section { margin-bottom: 14px; }
+.mockdoc-toc__heading {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--docs-text-soft); margin-bottom: 4px;
+}
+.mockdoc-toc__link {
+  display: block; font-size: 13px; line-height: 1.5;
+  color: var(--docs-link); padding: 2px 0;
+}
+.mockdoc-toc__link.is-current { color: var(--docs-text); font-weight: 700; }
+.mockdoc-toc__link:hover { text-decoration: underline; }
+
+.mockdoc-article { flex: 1 1 auto; min-width: 0; }
+.mockdoc-article__meta { font-size: 12.5px; color: var(--docs-text-soft); margin-bottom: 4px; }
+.mockdoc-article__title { font-family: var(--font-body); font-size: 24px; font-weight: 700; color: var(--docs-text); margin: 0 0 14px; }
+.mockdoc-article__p { font-size: 14.5px; line-height: 1.65; color: var(--docs-text); margin: 0 0 14px; }
+.mockdoc-article__p a.mockdoc-link { color: var(--docs-link); text-decoration: none; }
+.mockdoc-article__p a.mockdoc-link:hover { text-decoration: underline; }
+
+/* The per-user assigned word — see data/mock-docs.js's answerCandidates
+   and js/games.js's runHyperlinkRace. Styled like an actual highlighter
+   pass over the text, not a hyperlink, so it doesn't read as "click me". */
+.mockdoc-answer {
+  background: var(--gold); color: var(--navy);
+  padding: 1px 5px; border-radius: 4px;
+  font-weight: 800;
+}
+
+/* ===========================================================================
    Responsive — tablet and mobile
    Everything above this point was written desktop-first (fixed px values
    throughout); these breakpoints retrofit it downward rather than
@@ -936,6 +1014,12 @@ a { color: inherit; text-decoration: none; cursor: none; }
   .track-hint { display: none; } /* the hover popover itself is desktop-only below 640px anyway — see .track-marker-popover */
   .lb-tabs { grid-template-columns: repeat(2, 1fr); }
   .sketch-modal { max-width: 92vw; padding: 26px; }
+
+  /* The sidebar+article two-column layout gets cramped well before phone
+     width — stack the TOC above the article instead of squeezing both. */
+  .mockdoc-layout { flex-direction: column; }
+  .mockdoc-toc { flex: none; width: 100%; border-right: none; border-bottom: 1px solid var(--docs-border); padding-right: 0; padding-bottom: 14px; margin-bottom: 4px; }
+  .mockdoc-toc__section { display: inline-block; margin-right: 18px; vertical-align: top; }
 }
 
 @media (max-width: 640px) {
@@ -946,6 +1030,9 @@ a { color: inherit; text-decoration: none; cursor: none; }
 
   .canvas-main { padding: 84px 14px 48px; }
   .hub-hero { margin-bottom: 32px; gap: 8px; }
+  .hr-toolbar { padding: 8px 12px; }
+  .hr-toolbar__timer { font-size: 20px; }
+  .hr-toolbar .doodle-btn.sm { padding: 8px 12px; font-size: 11px; }
   .hub-hero .doodle-tag { font-size: 16px; }
   .sketch-title.hub-hero__title { font-size: 22px; }
   .activities-title { margin-bottom: 16px; font-size: 22px; }

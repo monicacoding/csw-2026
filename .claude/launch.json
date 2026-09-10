@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "csw-2026",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["/Users/monicafariacaires/Documents/webdev/claude/csw-2026/scripts/dev-server.js"],
+      "port": 8935
+    }
+  ]
+}

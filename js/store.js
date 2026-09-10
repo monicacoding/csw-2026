@@ -10,6 +10,8 @@
 // Collections:
 //   users/{CODE}
 //   hyperlinkRaceEntries/{CODE}
+//   hyperlinkRaceProgress/{CODE}          the per-user assigned answer word
+//                                         — see assignHyperlinkAnswer below
 //   snapJudgementEntries/{CODE}
 //   triviaEntries/{CODE}/days/{DAY_ID}   subcollection — see submitTriviaDay
 //   photoFinishEntries/{CODE}            + votes/{VOTER_CODE} subcollection
@@ -214,6 +216,24 @@ const Store = (() => {
     return FirestoreDB.listCollection(daysCollection);
   }
 
+  // ---- Hyperlink Race: per-user assigned answer word ---------------------
+  // The anti-sharing mechanism (see data/mock-docs.js's answerCandidates on
+  // the goal page): the first time a user reaches the goal page, the
+  // running game session (js/games.js's runHyperlinkRace) picks one
+  // candidate word for them and calls this to persist it — `merge: true`
+  // (setDoc's third arg) so a re-entry into the same page later in the same
+  // session doesn't clobber it with a fresh word. Read back at submit time
+  // via getHyperlinkAssignment rather than trusting only the in-memory copy
+  // the session already holds, so what a user is actually scored against is
+  // whatever was durably assigned, not whatever their client claims it was.
+  async function assignHyperlinkAnswer(code, word) {
+    await FirestoreDB.setDoc('hyperlinkRaceProgress', code, { code, word, assignedAt: FirestoreDB.now() }, true);
+  }
+
+  async function getHyperlinkAssignment(code) {
+    return FirestoreDB.getDoc('hyperlinkRaceProgress', code);
+  }
+
   async function getLeaderboard(collection, { orderBy, direction = 'desc', limit = 50 }) {
     let rows = await FirestoreDB.listCollection(collection);
     rows.sort((a, b) => {
@@ -302,6 +322,8 @@ const Store = (() => {
     hasSubmittedTriviaDay,
     getTriviaDayEntry,
     getTriviaDaysCompleted,
+    assignHyperlinkAnswer,
+    getHyperlinkAssignment,
     getLeaderboard,
     getCombinedLeaderboard,
     getPhotoFinishEntries,
