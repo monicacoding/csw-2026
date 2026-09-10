@@ -1,21 +1,25 @@
 // ---------------------------------------------------------------------------
-// Real Firestore data layer — the exact same 6-function interface
-// js/mock-db.js had (getDoc, setDoc, incrementField, listCollection,
-// subPath, now), so js/store.js's public API (Store.*, what the rest of
-// the app actually calls) needed no shape changes to swap over — only
-// `await` added in front of calls that are now genuinely async network
-// requests instead of synchronous localStorage reads.
+// Real Firestore data layer — the same interface js/mock-db.js had
+// (getDoc, setDoc, incrementField, listCollection, subPath, now, plus
+// deleteDoc — see below), so js/store.js's public API (Store.*, what the
+// rest of the app actually calls) needed no shape changes to swap over —
+// only `await` added in front of calls that are now genuinely async
+// network requests instead of synchronous localStorage reads.
 //
-// No `reset()` here. MockDB.reset() wiped the *entire* local mock database
-// for quick testing — safe against a throwaway localStorage blob, but it
-// would be a real, destructive, everyone's-data-wiping operation against
-// this actual shared Firestore project. That capability (and the "Reset"
-// button in the preview strip that called it) was deliberately dropped,
-// not carried over — see js/app.js's renderPreviewStrip.
+// No whole-database `reset()` here, still. MockDB.reset() wiped the
+// *entire* local mock database — safe against a throwaway localStorage
+// blob, but it would be a real, destructive, everyone's-data-wiping
+// operation against this actual shared Firestore project, so that
+// capability was never carried over wholesale. What *did* come back is
+// Store.resetUserProgress — a per-user reset (this account's own docs
+// only, never another user's), reachable only through the Developer Mode
+// panel behind js/app.js's DEV_MODE flag. deleteDoc below exists
+// specifically to support that.
 // ---------------------------------------------------------------------------
 import { db } from './firebase-config.js';
 import {
-  doc, getDoc as fsGetDoc, setDoc as fsSetDoc, getDocs, collection as fsCollection, increment,
+  doc, getDoc as fsGetDoc, setDoc as fsSetDoc, deleteDoc as fsDeleteDoc,
+  getDocs, collection as fsCollection, increment,
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
 
 const FirestoreDB = (() => {
@@ -50,6 +54,14 @@ const FirestoreDB = (() => {
     await fsSetDoc(doc(db, collectionPath, id), { ...rest, [field]: increment(amount) }, { merge: true });
   }
 
+  // Used only by Store.resetUserProgress (the Developer Mode panel's Reset
+  // button — see js/app.js's DEV_MODE) — no other flow in this app ever
+  // deletes a document. Deleting something that doesn't exist is a no-op in
+  // Firestore, not an error, so callers don't need to check existence first.
+  async function deleteDoc(collectionPath, id) {
+    await fsDeleteDoc(doc(db, collectionPath, id));
+  }
+
   async function listCollection(collectionPath) {
     const snap = await getDocs(fsCollection(db, collectionPath));
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -64,7 +76,7 @@ const FirestoreDB = (() => {
     return `${collectionPath}/${id}/${sub}`;
   }
 
-  return { getDoc, setDoc, incrementField, listCollection, subPath, now };
+  return { getDoc, setDoc, deleteDoc, incrementField, listCollection, subPath, now };
 })();
 
 window.FirestoreDB = FirestoreDB;
