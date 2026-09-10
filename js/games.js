@@ -43,12 +43,16 @@ const Games = (() => {
 
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 
-  // Hyperlink Race and Snap Judgement specifically need a real desktop
-  // browser (Hyperlink Race opens a second tab to hunt through; Snap
-  // Judgement's crop-reveal + dropdown are tuned for a mouse) — block
-  // starting either one from a phone-class viewport rather than let it run
-  // in a degraded state. Race Day Trivia has no such requirement and isn't
-  // gated here.
+  // Snap Judgement specifically needs a real desktop browser (its crop-
+  // reveal + dropdown are tuned for a mouse) — block starting it from a
+  // phone-class viewport rather than let it run in a degraded state. Race
+  // Day Trivia has no such requirement and isn't gated here. Hyperlink
+  // Race used to be gated here too, back when Start opened a second real
+  // tab to hunt through — now that the "docs" it hunts through
+  // (data/mock-docs.js) are internal views rendered inside this same
+  // modal, that rationale no longer applies; its sidebar+article layout
+  // instead gets a responsive stacked treatment on narrow viewports (see
+  // .mockdoc-layout in css/sketch.css) rather than being blocked outright.
   function renderDesktopOnlyBlock(body, day, title) {
     body.innerHTML = modalHeader(day, title) + `
       <div style="text-align:center;">
@@ -96,32 +100,80 @@ const Games = (() => {
   }
 
   // ---------------- Hyperlink Race (Tuesday · Picking Up The Pace) ----------------
-  const HR_START_URL = 'https://example.com/company-news';
-  const HR_CORRECT_DATE = '2026-09-01'; // ISO date the goal page was actually last updated
+  // Self-contained now — no real external site. The "docs" being hunted
+  // through are data/mock-docs.js's 18 fictional pages, rendered as
+  // internal views inside this same modal; clicking an internal link just
+  // swaps which page this render loop is showing (see runHyperlinkRace's
+  // `currentPageId`, a plain closure variable — that's the "internal
+  // navigation state" that lets Found It! be checked against where the
+  // player actually is, rather than trusting their word for it).
 
-  function parseFlexibleDate(input) {
-    const cleaned = input.trim();
-    const d = new Date(cleaned);
-    if (!isNaN(d.getTime())) {
-      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
-      return `${y}-${m}-${day}`;
-    }
-    const iso = cleaned.match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-    const us = cleaned.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (us) return `${us[3]}-${String(us[1]).padStart(2,'0')}-${String(us[2]).padStart(2,'0')}`;
-    return null;
+  // Wraps the single occurrence of `candidate.word` in its designated
+  // paragraph (data/mock-docs.js's answerCandidates — each pinned to one
+  // exact paragraph so this can't accidentally match some other, unrelated
+  // appearance of the same word elsewhere in the article) in a highlight
+  // span. Every other paragraph, and the goal page for every other user
+  // this session assigned a different candidate to, is untouched — the
+  // underlying article is identical for everyone; only this one word
+  // differs per player.
+  function mockDocsInjectHighlight(bodyParagraphs, candidate) {
+    if (!candidate) return bodyParagraphs;
+    return bodyParagraphs.map((html, i) => {
+      if (i !== candidate.paragraph) return html;
+      const escapedWord = candidate.word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`\\b(${escapedWord})\\b`, 'i');
+      return html.replace(re, '<mark class="mockdoc-answer">$1</mark>');
+    });
   }
 
-  // "Read-only view of their submission" (rather than a bare "you're done"
-  // message) for the three activities whose only post-submit screen is this
-  // shared one — Photo Finish and Nomination get theirs for free via the
-  // Gallery/Recognition Wall they already re-render into.
+  function mockDocsBreadcrumbHTML(page) {
+    return `<div class="mockdoc-breadcrumb">Meridian CX Docs <span class="mockdoc-breadcrumb__sep">›</span> ${escapeHtml(page.category)} <span class="mockdoc-breadcrumb__sep">›</span> <span class="mockdoc-breadcrumb__current">${escapeHtml(page.title)}</span></div>`;
+  }
+
+  // Every page, grouped by category (MOCKDOCS_CATEGORY_ORDER — see
+  // data/mock-docs.js) — a full site TOC, not just the pages reachable
+  // from wherever the player currently is, same as a real docs sidebar.
+  function mockDocsSidebarHTML(currentPageId) {
+    const sections = MOCKDOCS_CATEGORY_ORDER.map((category) => {
+      const items = Object.entries(MOCKDOCS_PAGES)
+        .filter(([, p]) => p.category === category)
+        .map(([id, p]) => `<a href="#" class="mockdoc-toc__link mockdoc-link ${id === currentPageId ? 'is-current' : ''}" data-doc-id="${id}">${escapeHtml(p.title)}</a>`)
+        .join('');
+      return `<div class="mockdoc-toc__section"><div class="mockdoc-toc__heading">${escapeHtml(category)}</div>${items}</div>`;
+    }).join('');
+    return `<nav class="mockdoc-toc">${sections}</nav>`;
+  }
+
+  function mockDocsArticleHTML(pageId, highlightCandidate) {
+    const page = MOCKDOCS_PAGES[pageId];
+    const paragraphs = mockDocsInjectHighlight(page.body, highlightCandidate);
+    return `
+      <article class="mockdoc-article">
+        <div class="mockdoc-article__meta">Article · ${page.lastUpdated} · ${page.readMinutes} minute${page.readMinutes === 1 ? '' : 's'} to read</div>
+        <h1 class="mockdoc-article__title">${escapeHtml(page.title)}</h1>
+        ${paragraphs.map((p) => `<p class="mockdoc-article__p">${p}</p>`).join('')}
+      </article>`;
+  }
+
+  // One delegated listener on the whole docs container catches clicks on
+  // every internal link — both the sidebar TOC and inline links inside the
+  // article body — rather than wiring each `<a>` individually. Safe to call
+  // fresh on every render: the previous container (and its listener) was
+  // just discarded along with the old innerHTML.
+  function wireMockDocLinks(container, onNavigate) {
+    container.addEventListener('click', (e) => {
+      const link = e.target.closest('.mockdoc-link');
+      if (!link) return;
+      e.preventDefault();
+      onNavigate(link.dataset.docId);
+    });
+  }
+
   function hyperlinkResultMessage(entry) {
     if (!entry) return "✅ You've already completed the Hyperlink Race!";
     const seconds = Math.round((entry.elapsedMs || 0) / 1000);
     const time = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-    return `✅ You finished in ${time}${entry.dateCorrect ? '' : ' (the date answer was off)'} — ${entry.score} pts.`;
+    return `✅ You finished in ${time}${entry.wordCorrect ? '' : " (the word wasn't quite right)"} — ${entry.score} pts.`;
   }
 
   async function hyperlinkRace(body, user, day, ctx) {
@@ -131,68 +183,139 @@ const Games = (() => {
       renderAlreadyCompleted(body, day, 'Hyperlink Race', hyperlinkResultMessage(entry), 'hyperlinkRaceEntries');
       return;
     }
-    if (window.isMobileViewport && window.isMobileViewport()) {
-      renderDesktopOnlyBlock(body, day, 'Hyperlink Race');
-      return;
-    }
+    renderHyperlinkIntro(body, user, day, ctx);
+  }
 
+  function renderHyperlinkIntro(body, user, day, ctx) {
+    const startPage = MOCKDOCS_PAGES[MOCKDOCS_START_PAGE_ID];
+    const goalPage = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID];
     body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
-      <div style="text-align:center;">
-        <p style="color:var(--ink-soft);">Race to find the answer hidden on our destination page. Click Start, hunt it down, then report back with when it was last updated.</p>
-        <div style="font-family:var(--font-display);font-size:52px;color:var(--navy);margin:20px 0;" id="hrTimer">00:00</div>
-        <div style="display:flex;gap:14px;justify-content:center;">
-          <button class="doodle-btn" id="hrStart">Start</button>
-          <button class="doodle-btn brick" id="hrFound" disabled>Found It!</button>
-        </div>
-        <div id="hrSubmitArea" style="margin-top:20px;display:none;">
-          <div class="field"><label>When was it last updated?</label><input id="hrDateAnswer" type="text" placeholder="e.g. March 3, 2026 or 03/03/2026" /></div>
-          <button class="doodle-btn navy" id="hrSubmit" style="width:100%;">Submit</button>
-        </div>
-      </div>`;
+      <div class="game-explainer">
+        <p>📄 <span><strong>Goal:</strong> starting from "${escapeHtml(startPage.title)}", click through our internal docs site to find "${escapeHtml(goalPage.title)}."</span></p>
+        <p>🔍 <span>Read as you go — it isn't one obvious link, and some links lead somewhere else entirely. The full site's sidebar is always there if you want to backtrack.</span></p>
+        <p>✨ <span>Once you're actually on the destination page, one ordinary word in the article will be highlighted <strong>just for you</strong> — everyone sees the same article, but a different word.</span></p>
+        <p>🏁 <span>Hit <strong>Found It!</strong> once you're there, then type the highlighted word to finish. Faster is better.</span></p>
+      </div>
+      <button class="doodle-btn" id="hrStart" style="width:100%;">Start the Race</button>`;
+    body.querySelector('#hrStart').addEventListener('click', () => {
+      ctx.lock(); // session starts now — no in-app way out until it's finished
+      runHyperlinkRace(body, user, day, ctx);
+    });
+  }
 
-    let startTime = null, timerInterval = null, elapsedMs = 0;
-    const timerEl = body.querySelector('#hrTimer');
+  function runHyperlinkRace(body, user, day, ctx) {
+    let currentPageId = MOCKDOCS_START_PAGE_ID;
+    let phase = 'browsing'; // 'browsing' | 'submitting'
+    // The candidate assigned to this player — set exactly once, the first
+    // time the goal page is reached (see renderBrowsing below), and reused
+    // on every later visit so the highlighted word doesn't jump around if
+    // they leave and come back before hitting Found It!.
+    let assignedCandidate = null;
+    let elapsedMs = null;
+    const startTime = Date.now();
+
     const fmt = (ms) => {
       const s = Math.floor(ms / 1000);
-      return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+      return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
     };
+    // Set up once, outside any render — each render below fully replaces
+    // body.innerHTML (including a fresh #hrTimer node), so this looks the
+    // element up fresh every tick rather than caching a now-detached one.
+    const timerInterval = setInterval(() => {
+      const el = body.querySelector('#hrTimer');
+      if (el) el.textContent = fmt(Date.now() - startTime);
+    }, 200);
 
-    body.querySelector('#hrStart').addEventListener('click', () => {
-      window.open(HR_START_URL, '_blank');
-      startTime = Date.now();
-      timerInterval = setInterval(() => { timerEl.textContent = fmt(Date.now() - startTime); }, 200);
-      body.querySelector('#hrStart').disabled = true;
-      body.querySelector('#hrFound').disabled = false;
-      // Session has genuinely started — lock the modal against outside-
-      // click/✕ dismissal. No in-app way out from here except finishing
-      // (a browser refresh still works as an escape hatch, just not one
-      // this UI offers — see the comment on ctx.lock in app.js).
-      ctx.lock();
-    });
+    function navigateTo(pageId) {
+      if (!MOCKDOCS_PAGES[pageId]) return;
+      currentPageId = pageId;
+      render();
+    }
 
-    body.querySelector('#hrFound').addEventListener('click', () => {
-      clearInterval(timerInterval);
-      elapsedMs = Date.now() - startTime;
-      body.querySelector('#hrSubmitArea').style.display = 'block';
-      body.querySelector('#hrFound').disabled = true;
-    });
+    function renderBrowsing() {
+      if (currentPageId === MOCKDOCS_GOAL_PAGE_ID && !assignedCandidate) {
+        const candidates = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID].answerCandidates;
+        assignedCandidate = candidates[Math.floor(Math.random() * candidates.length)];
+        // Persisted so it can be validated against at submit time even if
+        // this running session's own copy is somehow lost — see
+        // Store.assignHyperlinkAnswer's comment. Fire-and-forget: nothing
+        // here needs to block on the write completing.
+        Store.assignHyperlinkAnswer(user.code, assignedCandidate.word)
+          .catch((e) => console.warn('Could not persist Hyperlink Race answer assignment', e));
+      }
+      const highlight = currentPageId === MOCKDOCS_GOAL_PAGE_ID ? assignedCandidate : null;
 
-    body.querySelector('#hrSubmit').addEventListener('click', async (e) => {
-      const raw = body.querySelector('#hrDateAnswer').value;
-      const parsed = parseFlexibleDate(raw);
-      const dateCorrect = parsed === HR_CORRECT_DATE;
-      const seconds = Math.round(elapsedMs / 1000);
-      let score = Math.max(10, Math.floor(200 - seconds));
-      if (!dateCorrect) score = Math.floor(score / 2);
+      body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
+        <div class="hr-toolbar">
+          <div class="hr-toolbar__timer" id="hrTimer">${fmt(Date.now() - startTime)}</div>
+          <button class="doodle-btn brick sm" id="hrFound">🏁 Found It!</button>
+        </div>
+        <div class="mockdoc">
+          ${mockDocsBreadcrumbHTML(MOCKDOCS_PAGES[currentPageId])}
+          <div class="mockdoc-layout">
+            ${mockDocsSidebarHTML(currentPageId)}
+            ${mockDocsArticleHTML(currentPageId, highlight)}
+          </div>
+        </div>`;
 
-      e.target.disabled = true;
-      e.target.textContent = 'Submitting…';
-      await Store.submitEntry({
-        collection: 'hyperlinkRaceEntries', code: user.code, bingoKey: 'hyperlinkRace',
-        scoreDelta: score, data: { elapsedMs, dateCorrect, rawAnswer: raw, score },
+      wireMockDocLinks(body.querySelector('.mockdoc'), navigateTo);
+
+      // The actual destination check — point 4's replacement for self-
+      // report. currentPageId is this closure's own navigation state, kept
+      // in sync purely by navigateTo above; there's no way to reach
+      // "submitting" without it actually equalling the goal page's id.
+      body.querySelector('#hrFound').addEventListener('click', () => {
+        if (currentPageId !== MOCKDOCS_GOAL_PAGE_ID) {
+          Toast.show("📍 You're not on the destination page yet — keep exploring!", 'error');
+          return;
+        }
+        clearInterval(timerInterval);
+        elapsedMs = Date.now() - startTime;
+        phase = 'submitting';
+        render();
       });
-      ctx.done();
-    });
+    }
+
+    function renderSubmit() {
+      body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
+        <div style="text-align:center;">
+          <p style="font-size:40px;">🏁</p>
+          <p style="color:var(--ink-soft);">You made it! What word was highlighted, just for you?</p>
+          <div class="field"><label>Highlighted word</label><input id="hrWordAnswer" type="text" autocomplete="off" placeholder="Type the word…" /></div>
+          <button class="doodle-btn navy" id="hrSubmit" style="width:100%;">Submit</button>
+        </div>`;
+
+      body.querySelector('#hrSubmit').addEventListener('click', async (e) => {
+        const raw = body.querySelector('#hrWordAnswer').value.trim();
+        e.target.disabled = true;
+        e.target.textContent = 'Submitting…';
+
+        // Validate against the durably-stored assignment rather than only
+        // this session's in-memory copy — see Store.assignHyperlinkAnswer.
+        // Falls back to the in-memory copy only if that read itself fails,
+        // so a transient network hiccup doesn't wrongly fail someone who
+        // typed the right word.
+        const assignment = await Store.getHyperlinkAssignment(user.code).catch(() => null);
+        const correctWord = assignment?.word || assignedCandidate?.word || '';
+        const wordCorrect = !!raw && !!correctWord && raw.toLowerCase() === correctWord.toLowerCase();
+        const seconds = Math.round(elapsedMs / 1000);
+        let score = Math.max(10, Math.floor(200 - seconds));
+        if (!wordCorrect) score = Math.floor(score / 2);
+
+        await Store.submitEntry({
+          collection: 'hyperlinkRaceEntries', code: user.code, bingoKey: 'hyperlinkRace',
+          scoreDelta: score, data: { elapsedMs, wordCorrect, rawAnswer: raw, score },
+        });
+        ctx.done();
+      });
+    }
+
+    function render() {
+      if (phase === 'submitting') renderSubmit();
+      else renderBrowsing();
+    }
+
+    render();
   }
 
   // ---------------- Snap Judgement (Thursday · The Final Stretch) ----------------

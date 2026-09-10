@@ -775,11 +775,17 @@ const App = (() => {
   // update. Clearing body up front and catching a failed renderFn here (it
   // may or may not return a promise — awaiting a non-promise is a no-op)
   // makes that failure visible instead, for any modal, not just this one.
-  async function openModal(renderFn) {
+  //
+  // `wide`: Hyperlink Race's mock docs site (sidebar + article side by
+  // side) needs more room than the standard 640px modal — see
+  // .sketch-modal--wide in css/sketch.css. Every other caller omits this
+  // and gets the normal width.
+  async function openModal(renderFn, { wide = false } = {}) {
     modalLocked = false; // every new modal open starts unlocked, regardless of what the previous one was showing
     const modal = ensureModal();
     modal.style.display = 'flex';
     modal.querySelector('#genericModalClose').style.display = '';
+    modal.querySelector('.sketch-modal').classList.toggle('sketch-modal--wide', wide);
     const body = modal.querySelector('#genericModalBody');
     body.innerHTML = '';
     try {
@@ -876,7 +882,7 @@ const App = (() => {
       //    browse (and for Photo Finish, vote) during the active week.
       weekLocked,
       viewOnly: policy.mode === 'view',
-    }));
+    }), { wide: activityId === 'hyperlinkRace' });
   }
 
   // ---------------- Leaderboard ----------------
