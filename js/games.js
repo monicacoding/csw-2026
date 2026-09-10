@@ -228,14 +228,25 @@ const Games = (() => {
   function renderHyperlinkIntro(body, user, day, ctx) {
     const startPage = MOCKDOCS_PAGES[MOCKDOCS_START_PAGE_ID];
     const goalPage = MOCKDOCS_PAGES[MOCKDOCS_GOAL_PAGE_ID];
-    body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
-      <div class="game-explainer">
-        <p>📄 <span><strong>Goal:</strong> starting from "${escapeHtml(startPage.title)}", click through our internal docs site to find "${escapeHtml(goalPage.title)}."</span></p>
-        <p>🔍 <span>Read as you go — it isn't one obvious link, some links lead somewhere else entirely, and there's no page list to browse. Your start and goal stay pinned at the top the whole time, and Back plus a trail of everywhere you've been make backtracking easy.</span></p>
-        <p>✨ <span>Once you're actually on the destination page, one ordinary word in the article will be highlighted <strong>just for you</strong> — everyone sees the same article, but a different word.</span></p>
-        <p>🏁 <span>Hit <strong>Found It!</strong> once you're there, then type the highlighted word to finish. Faster is better.</span></p>
-      </div>
-      <button class="doodle-btn" id="hrStart" style="width:100%;">Start the Race</button>`;
+    // .hr-screen-center — this activity's modal is pinned to a fixed,
+    // viewport-filling height (see openActivityModal's `pinned` option and
+    // .sketch-modal--pinned in css/sketch.css) for the whole session, so
+    // its size stays consistent across the intro, browsing, and the
+    // submit screen rather than shrink-wrapping per screen. This screen's
+    // own content is short, so it's centered within that fixed height
+    // instead of sitting at the natural top with a lot of blank modal
+    // below it — see that class's own comment for the rest of why.
+    body.innerHTML = `
+      <div class="hr-screen-center">
+        ${modalHeader(day, 'Hyperlink Race')}
+        <div class="game-explainer">
+          <p>📄 <span><strong>Goal:</strong> starting from "${escapeHtml(startPage.title)}", click through our internal docs site to find "${escapeHtml(goalPage.title)}."</span></p>
+          <p>🔍 <span>Read as you go — it isn't one obvious link, some links lead somewhere else entirely, and there's no page list to browse. Your start and goal stay pinned at the top the whole time, and Back plus a trail of everywhere you've been make backtracking easy.</span></p>
+          <p>✨ <span>Once you're actually on the destination page, one ordinary word in the article will be highlighted <strong>just for you</strong> — everyone sees the same article, but a different word.</span></p>
+          <p>🏁 <span>Hit <strong>Found It!</strong> once you're there, then type the highlighted word to finish. Faster is better.</span></p>
+        </div>
+        <button class="doodle-btn" id="hrStart" style="width:100%;">Start the Race</button>
+      </div>`;
     body.querySelector('#hrStart').addEventListener('click', () => {
       ctx.lock(); // session starts now — no in-app way out until it's finished
       runHyperlinkRace(body, user, day, ctx);
@@ -390,13 +401,18 @@ const Games = (() => {
     }
 
     function renderSubmit() {
-      body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
-        <div style="text-align:center;">
-          <p style="font-size:40px;">🏁</p>
-          <p style="color:var(--ink-soft);">You made it! What word was highlighted, just for you?</p>
-          <div class="field"><label>Highlighted word</label><input id="hrWordAnswer" type="text" autocomplete="off" placeholder="Type the word…" /></div>
-          <button class="doodle-btn navy" id="hrSubmit" style="width:100%;">Submit</button>
-          <button class="doodle-btn ghost" id="hrCancel" style="width:100%;margin-top:10px;">← Back to Article</button>
+      // Same .hr-screen-center treatment as renderHyperlinkIntro above, and
+      // for the same reason — short content, fixed-height pinned modal.
+      body.innerHTML = `
+        <div class="hr-screen-center">
+          ${modalHeader(day, 'Hyperlink Race')}
+          <div style="text-align:center;">
+            <p style="font-size:40px;">🏁</p>
+            <p style="color:var(--ink-soft);">You made it! What word was highlighted, just for you?</p>
+            <div class="field"><label>Highlighted word</label><input id="hrWordAnswer" type="text" autocomplete="off" placeholder="Type the word…" /></div>
+            <button class="doodle-btn navy" id="hrSubmit" style="width:100%;">Submit</button>
+            <button class="doodle-btn ghost" id="hrCancel" style="width:100%;margin-top:10px;">← Back to Article</button>
+          </div>
         </div>`;
 
       // Not a submission attempt, not an exit from the session — just
