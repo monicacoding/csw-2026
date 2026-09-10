@@ -52,6 +52,22 @@ service cloud.firestore {
       allow list: if true;
     }
 
+    // In-progress session state for Race Day Trivia / Snap Judgement — see
+    // Store.saveTriviaSession/saveSnapSession in js/store.js. Same pattern
+    // as hyperlinkRaceProgress above: written continuously once a session
+    // starts, read back at app load by resumeInProgressSession (js/app.js)
+    // to reopen an interrupted session exactly where it left off, and
+    // cleared on actual submission.
+    match /triviaProgress/{code} {
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
+    }
+
+    match /snapJudgementProgress/{code} {
+      allow get, write: if code.matches('^[A-Z]{4}$');
+      allow list: if true;
+    }
+
     match /triviaEntries/{code} {
       allow get, write: if code.matches('^[A-Z]{4}$');
       allow list: if true;
