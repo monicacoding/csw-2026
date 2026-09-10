@@ -581,6 +581,51 @@ const App = (() => {
     card.classList.add('show');
   }
 
+  // Standard flip/collision handling for the hover popover, run fresh on
+  // every hover (mouseenter/focus, not mouseover — see the caller) rather
+  // than once at render time, since a marker's available space depends on
+  // the current viewport size, not anything that changes when the track
+  // itself re-renders. The popover stays permanently laid out at
+  // opacity:0 (never display:none — see the CSS), so its real dimensions
+  // are measurable via getBoundingClientRect() even while hidden.
+  //
+  // Vertical: defaults to opening upward (bottom:100% of the marker, the
+  // original behavior) and flips to open downward only if there's less
+  // room above than the popover actually needs — e.g. Friday's 4-item
+  // popover no longer gets clipped at the top of the viewport.
+  //
+  // Horizontal: defaults to centered on the marker and shifts only enough
+  // to keep both edges inside the viewport (with a small margin) — e.g.
+  // Monday near the left edge, Friday near the right. The shift is applied
+  // as a CSS custom property added on top of the existing translateX(-50%)
+  // centering, so the arrow tail (positioned independently, relative to
+  // the popover's own box) can drift slightly off dead-center when a
+  // popover is clamped against an edge — an accepted tradeoff for keeping
+  // the whole box on-screen, the same one most popover libraries make.
+  function positionTrackPopover(markerEl) {
+    const popover = markerEl.querySelector('.track-marker-popover');
+    if (!popover) return;
+    // Reset before measuring so a stale flip/shift from a previous hover
+    // (e.g. after a window resize) can't affect this measurement.
+    popover.classList.remove('track-marker-popover--flip-down');
+    popover.style.removeProperty('--popover-shift-x');
+
+    const margin = 12; // minimum gap kept from the viewport edge
+    const markerRect = markerEl.getBoundingClientRect();
+    const popRect = popover.getBoundingClientRect();
+
+    if (markerRect.top < popRect.height + margin) {
+      popover.classList.add('track-marker-popover--flip-down');
+    }
+
+    const naturalLeft = markerRect.left + markerRect.width / 2 - popRect.width / 2;
+    const naturalRight = naturalLeft + popRect.width;
+    let shiftX = 0;
+    if (naturalLeft < margin) shiftX = margin - naturalLeft;
+    else if (naturalRight > window.innerWidth - margin) shiftX = (window.innerWidth - margin) - naturalRight;
+    if (shiftX !== 0) popover.style.setProperty('--popover-shift-x', `${shiftX}px`);
+  }
+
   function renderTrack() {
     const days = AppState.computeDashboardDays(currentUser);
     const completed = AppState.completedDayCount(currentUser);
@@ -597,14 +642,25 @@ const App = (() => {
               </div>`;
     }).join('');
     // Tap-to-reveal on mobile (no :hover to rely on) — desktop keeps its
-    // existing hover behavior untouched (dayPopoverHTML/.track-marker-popover
-    // above, shown purely via CSS :hover, same as before this pass).
+    // existing hover behavior (dayPopoverHTML/.track-marker-popover above,
+    // shown purely via CSS :hover), just with real flip/collision handling
+    // now (see positionTrackPopover) instead of always opening upward and
+    // centered regardless of how close the marker is to a viewport edge.
     if (window.isMobileViewport && window.isMobileViewport()) {
       [...markers.children].forEach((markerEl, i) => {
         markerEl.addEventListener('click', (e) => {
           e.stopPropagation();
           showMobileDayCard(days[i]);
         });
+      });
+    } else {
+      [...markers.children].forEach((markerEl) => {
+        // mouseenter (not mouseover) so this runs once per hover, not once
+        // per pixel of mouse movement; :focus-visible support (Tab/Enter)
+        // gets the same treatment via the plain focus event, matching the
+        // existing .track-marker:focus-visible CSS rule.
+        markerEl.addEventListener('mouseenter', () => positionTrackPopover(markerEl));
+        markerEl.addEventListener('focus', () => positionTrackPopover(markerEl));
       });
     }
 
@@ -812,12 +868,24 @@ const App = (() => {
   // the sidebar's gone (a single-column article reads fine at the normal
   // width) no current caller passes it, but the option's kept for whatever
   // needs it next rather than removed and re-added later.
-  async function openModal(renderFn, { wide = false } = {}) {
+  //
+  // `pinned`: keeps the modal's top edge at a fixed spot on screen and its
+  // own size constant, instead of the default shrink-wrap-and-recenter
+  // behavior that otherwise makes the whole box visibly shift on screen
+  // whenever content height changes (Hyperlink Race's articles vary a lot
+  // page to page). See .modal-backdrop--top/.sketch-modal--pinned in
+  // css/sketch.css for what each half actually does. Everything else stays
+  // on the default shrink-wrapped/centered look, which reads better for
+  // the short, one-screen content most modals here show.
+  async function openModal(renderFn, { wide = false, pinned = false } = {}) {
     modalLocked = false; // every new modal open starts unlocked, regardless of what the previous one was showing
     const modal = ensureModal();
     modal.style.display = 'flex';
+    modal.classList.toggle('modal-backdrop--top', pinned);
     modal.querySelector('#genericModalClose').style.display = '';
-    modal.querySelector('.sketch-modal').classList.toggle('sketch-modal--wide', wide);
+    const sketchModal = modal.querySelector('.sketch-modal');
+    sketchModal.classList.toggle('sketch-modal--wide', wide);
+    sketchModal.classList.toggle('sketch-modal--pinned', pinned);
     const body = modal.querySelector('#genericModalBody');
     body.innerHTML = '';
     try {
@@ -914,7 +982,7 @@ const App = (() => {
       //    browse (and for Photo Finish, vote) during the active week.
       weekLocked,
       viewOnly: policy.mode === 'view',
-    }));
+    }), { pinned: activityId === 'hyperlinkRace' });
   }
 
   // ---------------- Leaderboard ----------------

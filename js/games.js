@@ -159,6 +159,10 @@ const Games = (() => {
   // of reading, defeating the point of the maze. Every entry but the last
   // (the current page, not a link) jumps back to that point in the trail —
   // not just one step back, which is what the dedicated Back button is for.
+  // Only ever rendered inside the expanded panel (#hrTrail, toggled by
+  // trailExpanded — see renderBrowsing) — wraps onto multiple lines there
+  // rather than needing to scroll, since it's only on screen when actually
+  // expanded, not sitting permanently in the toolbar taking up a whole row.
   function mockDocsTrailHTML(history) {
     return history.map((id, i) => {
       const isCurrent = i === history.length - 1;
@@ -246,6 +250,12 @@ const Games = (() => {
     // to keep in sync with it.
     let history = [MOCKDOCS_START_PAGE_ID];
     let phase = 'browsing'; // 'browsing' | 'submitting'
+    // Whether the visited-pages trail is showing its full expanded panel
+    // or just the collapsed "Path: N pages" toggle (the default) — see
+    // renderBrowsing. Reset to collapsed on every navigation (forward,
+    // Back, or a trail jump) rather than persisted, so it doesn't stay
+    // sprawled open while reading a new page.
+    let trailExpanded = false;
     // The candidate assigned to this player — set exactly once, the first
     // time the goal page is reached (see renderBrowsing below), and reused
     // on every later visit so the highlighted word doesn't jump around if
@@ -275,6 +285,7 @@ const Games = (() => {
     function navigateTo(pageId) {
       if (!MOCKDOCS_PAGES[pageId]) return;
       history.push(pageId);
+      trailExpanded = false;
       render();
     }
 
@@ -284,6 +295,7 @@ const Games = (() => {
     function goBack() {
       if (history.length <= 1) return;
       history.pop();
+      trailExpanded = false;
       render();
     }
 
@@ -293,6 +305,7 @@ const Games = (() => {
     function jumpToTrailIndex(i) {
       if (i < 0 || i >= history.length - 1) return; // last entry is the current page — not a jump target
       history = history.slice(0, i + 1);
+      trailExpanded = false;
       render();
     }
 
@@ -312,13 +325,22 @@ const Games = (() => {
 
       body.innerHTML = modalHeader(day, 'Hyperlink Race') + `
         <div class="hr-toolbar">
-          <div class="hr-toolbar__goal">🚩 Start: <strong>${escapeHtml(startPage.title)}</strong> <span class="hr-toolbar__goal-arrow">→</span> 🏁 Goal: <strong>${escapeHtml(goalPage.title)}</strong></div>
-          <div class="hr-toolbar__row">
-            <div class="hr-toolbar__timer" id="hrTimer">${fmt(Date.now() - startTime)}</div>
-            <button type="button" class="doodle-btn ghost sm" id="hrBack" ${history.length <= 1 ? 'disabled' : ''}>← Back</button>
+          <div class="hr-objective">
+            <div class="hr-objective__timer" id="hrTimer">${fmt(Date.now() - startTime)}</div>
+            <div class="hr-objective__goals">
+              <div class="hr-objective__goal"><span class="hr-objective__goal-icon">🚩</span><span class="hr-objective__goal-label">Start</span><strong>${escapeHtml(startPage.title)}</strong></div>
+              <div class="hr-objective__goal"><span class="hr-objective__goal-icon">🏁</span><span class="hr-objective__goal-label">Goal</span><strong>${escapeHtml(goalPage.title)}</strong></div>
+            </div>
             <button type="button" class="doodle-btn brick sm" id="hrFound">🏁 Found It!</button>
           </div>
-          <div class="hr-toolbar__trail" id="hrTrail">${mockDocsTrailHTML(history)}</div>
+          <div class="hr-nav">
+            <button type="button" class="doodle-btn ghost sm" id="hrBack" ${history.length <= 1 ? 'disabled' : ''}>← Back</button>
+            <button type="button" class="hr-nav__trail-toggle" id="hrTrailToggle" aria-expanded="${trailExpanded}">
+              🧭 Path: ${history.length} page${history.length === 1 ? '' : 's'}
+              <span class="hr-nav__chevron">${trailExpanded ? '▴' : '▾'}</span>
+            </button>
+          </div>
+          ${trailExpanded ? `<div class="hr-nav__trail-expanded" id="hrTrail">${mockDocsTrailHTML(history)}</div>` : ''}
         </div>
         <div class="mockdoc">
           ${mockDocsBreadcrumbHTML(MOCKDOCS_PAGES[pageId])}
@@ -326,8 +348,17 @@ const Games = (() => {
         </div>`;
 
       wireMockDocLinks(body.querySelector('.mockdoc'), navigateTo);
-      wireMockDocsTrail(body.querySelector('#hrTrail'), jumpToTrailIndex);
+      const trailEl = body.querySelector('#hrTrail');
+      if (trailEl) wireMockDocsTrail(trailEl, jumpToTrailIndex);
       body.querySelector('#hrBack').addEventListener('click', goBack);
+      // Toggling the trail open/closed is purely local UI state — no
+      // navigation happened, so this re-renders directly rather than going
+      // through navigateTo/goBack/jumpToTrailIndex (which would reset it
+      // right back to collapsed).
+      body.querySelector('#hrTrailToggle').addEventListener('click', () => {
+        trailExpanded = !trailExpanded;
+        render();
+      });
 
       // The actual destination check — point 4's replacement for self-
       // report. `history`'s last entry is this closure's own navigation

@@ -196,7 +196,11 @@ a { color: inherit; text-decoration: none; cursor: none; }
    it's the one UI element in the whole app meant to read as "caution, dev
    tool," not as part of the actual player-facing experience. */
 .dev-mode-panel {
-  position: fixed; top: 68px; right: 28px; z-index: 60;
+  /* Player badge sits at top:22px and is ~48px tall (5px padding + 38px
+     avatar + 5px padding), i.e. its bottom edge is ~70px down — this used
+     to start at 68px, overlapping it by 2px with no visible gap at all.
+     84px leaves a real ~14px breathing gap between the two. */
+  position: fixed; top: 84px; right: 28px; z-index: 60;
   background: var(--gold); color: var(--navy);
   border: 2.5px solid var(--brick);
   border-radius: var(--radius-md);
@@ -436,7 +440,10 @@ a { color: inherit; text-decoration: none; cursor: none; }
 .track-marker-popover {
   position: absolute;
   bottom: 100%; left: 50%;
-  transform: translateX(-50%) translateY(-8px);
+  /* --popover-shift-x: set by js/app.js's positionTrackPopover when
+     centered would push either edge past the viewport (Monday near the
+     left, Friday near the right) — 0px the rest of the time. */
+  transform: translateX(calc(-50% + var(--popover-shift-x, 0px))) translateY(-8px);
   width: 250px;
   background: var(--white);
   border: 2px solid var(--navy);
@@ -462,6 +469,24 @@ a { color: inherit; text-decoration: none; cursor: none; }
 }
 .track-marker-popover::after { top: 100%; border-top-color: var(--navy); }
 .track-marker-popover::before { top: calc(100% - 2.5px); border-top-color: var(--white); border-width: 5px; }
+
+/* Flipped open downward instead — set by positionTrackPopover when there
+   isn't enough room above the marker (e.g. Friday's 4-item popover used to
+   get clipped at the top of the viewport). Every offset mirrors: anchors
+   from the marker's bottom instead of its top, and the arrow tail points
+   up at the marker instead of down. */
+.track-marker-popover--flip-down {
+  bottom: auto; top: 100%;
+  transform: translateX(calc(-50% + var(--popover-shift-x, 0px))) translateY(8px);
+}
+.track-marker-popover--flip-down::after {
+  top: auto; bottom: 100%;
+  border-top-color: transparent; border-bottom-color: var(--navy);
+}
+.track-marker-popover--flip-down::before {
+  top: auto; bottom: calc(100% - 2.5px);
+  border-top-color: transparent; border-bottom-color: var(--white);
+}
 .track-marker-popover__day { font-family: var(--font-hand); font-size: 16px; color: var(--navy); line-height: 1.2; }
 .track-marker-popover__theme { font-family: var(--font-hand); font-size: 14px; color: var(--ink-soft); margin-top: var(--space-1); }
 /* One row per activity that day (remote or on-site) — divider lines between
@@ -945,18 +970,33 @@ a { color: inherit; text-decoration: none; cursor: none; }
    roomier modal rather than removed and re-added later. */
 .sketch-modal--wide { max-width: 920px; }
 
+/* Keeps the modal's top edge at a fixed spot on screen for the whole
+   Hyperlink Race session, rather than the default centered-in-viewport
+   modal recentering (and so visibly shifting) every time content height
+   changes between the intro, an article, the submit screen, and back —
+   most noticeably page-to-page while browsing, since articles vary a lot
+   in length. `openModal`'s `pinned` option (js/app.js) toggles both
+   halves: flex-start instead of center on the backdrop so a shorter box
+   doesn't get vertically recentered, and a fixed (not max-) height on the
+   modal itself so the box's own size never changes either — only its
+   internal content scrolls (.sketch-modal's own overflow-y:auto, already
+   in place). Scoped to whoever opts in via `pinned: true`, not the
+   default — most modals here are short/one-screen and read better
+   shrink-wrapped and centered, as before. */
+.modal-backdrop--top { align-items: flex-start; }
+.sketch-modal--pinned { height: 82vh; }
+
 /* Sticky within the modal's own scroll container (.sketch-modal has
    overflow-y:auto — see the modal rules earlier in this file) so the whole
-   toolbar — timer, Back, Found It!, and the visited-pages trail — stays
-   visible no matter how far into a long article the player has scrolled,
-   the same "always-visible while browsing" promise the old real-second-tab
-   version got for free just by living outside the modal entirely. Three
-   stacked rows rather than the single row this used to be: the pinned
-   start/goal reminder, the timer+Back+Found It! controls, then the trail —
-   each doing one job, rather than cramming all of it onto one line. */
+   toolbar stays visible no matter how far into a long article the player
+   has scrolled — the same "always-visible while browsing" promise the old
+   real-second-tab version got for free just by living outside the modal
+   entirely. Two sections, not one undifferentiated row: .hr-objective
+   (timer, start/goal, Found It!) is the "what am I doing and how do I
+   finish" area, styled to read as the primary one; .hr-nav (Back + the
+   visited-pages trail) is pure backtracking, secondary and quieter. */
 .hr-toolbar {
   position: sticky; top: 0; z-index: 5;
-  display: flex; flex-direction: column; gap: 8px;
   background: var(--white);
   border: 2.5px solid var(--navy);
   border-radius: 16px;
@@ -964,42 +1004,68 @@ a { color: inherit; text-decoration: none; cursor: none; }
   margin-bottom: 16px;
   filter: drop-shadow(3px 4px 0 rgba(29,53,87,0.15));
 }
-/* Pinned so the goal (and start) never has to be memorized — replaces the
-   old sidebar as the map, in effect: you always know where you're headed
-   even without a full page list to browse. */
-.hr-toolbar__goal {
-  font-family: var(--font-hand); font-size: 14px; color: var(--ink-soft);
-  line-height: 1.4;
-}
-.hr-toolbar__goal strong { color: var(--navy); }
-.hr-toolbar__goal-arrow { color: var(--ink-soft); opacity: 0.6; margin: 0 2px; }
-.hr-toolbar__row { display: flex; align-items: center; gap: 10px; }
-.hr-toolbar__timer { font-family: var(--font-display); font-size: 26px; color: var(--navy); }
-.hr-toolbar__row .doodle-btn { flex-shrink: 0; }
-.hr-toolbar__row .doodle-btn:disabled { opacity: 0.35; }
-/* The Found It! button should stay pinned to the row's far end regardless
-   of how short/long Back's own label or the timer's digits are. */
-.hr-toolbar__row #hrFound { margin-left: auto; }
 
-/* The trail of pages actually visited this run (js/games.js's
-   mockDocsTrailHTML) — replaces the old sidebar as the "how do I get back"
-   answer, but only shows where you've actually been, not the whole site.
-   Horizontally scrolling rather than wrapping so a long backtracking
-   session doesn't grow the sticky toolbar taller and taller. */
-.hr-toolbar__trail {
-  display: flex; align-items: center; gap: 2px;
-  overflow-x: auto; white-space: nowrap;
-  padding-top: 2px;
+/* The objective area: timer + pinned start/goal + Found It!, grouped
+   together because all three are about the same thing — know where you
+   started, know where you're going, submit once you're there. */
+.hr-objective {
+  display: flex; align-items: center; gap: 12px;
+  padding-bottom: 10px;
+}
+.hr-objective__timer { font-family: var(--font-display); font-size: 26px; color: var(--navy); flex-shrink: 0; }
+.hr-objective__goals {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.hr-objective__goal {
+  font-family: var(--font-hand); font-size: 13.5px; color: var(--ink-soft);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hr-objective__goal-icon { margin-right: 3px; }
+.hr-objective__goal-label {
+  font-family: var(--font-body); font-weight: 800; text-transform: uppercase;
+  font-size: 10px; letter-spacing: 0.03em; color: var(--brick); margin-right: 4px;
+}
+.hr-objective__goal strong { color: var(--navy); font-weight: 800; }
+.hr-objective #hrFound { flex-shrink: 0; }
+
+/* The navigation area: Back sits with the trail rather than off in the
+   objective row, since both are backtracking tools, not goal-tracking
+   ones. Deliberately plainer than .hr-objective above — smaller text, no
+   bold weight — so the two areas read as primary vs. secondary at a
+   glance, not just by position. */
+.hr-nav {
+  display: flex; align-items: center; gap: 10px;
+  padding-top: 9px;
+  border-top: 1.5px dashed var(--docs-border, #D9DEE3);
+}
+.hr-nav .doodle-btn:disabled { opacity: 0.35; }
+.hr-nav__trail-toggle {
+  background: none; border: none; padding: 4px 2px;
+  display: flex; align-items: center; gap: 4px;
+  font-family: var(--font-hand); font-size: 13px; color: var(--ink-soft);
+}
+.hr-nav__trail-toggle:hover { color: var(--navy); }
+.hr-nav__chevron { font-size: 9px; }
+
+/* Expands in place below the collapsed "Path: N pages" toggle — wraps
+   rather than scrolling horizontally (the old single-line, overflow-x:auto
+   version — see the redesign note above), so an arbitrarily long
+   backtracking trail grows the panel downward instead of ever needing a
+   scrollbar, and it's only ever on screen when actually expanded. */
+.hr-nav__trail-expanded {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px;
+  padding-top: 8px; margin-top: 8px;
+  border-top: 1px dashed var(--docs-border, #D9DEE3);
 }
 .mockdoc-trail__item {
   font-size: 12px; color: var(--docs-link, #0969DA);
   background: none; border: none; padding: 2px 2px;
-  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  flex-shrink: 0;
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mockdoc-trail__item:not(:disabled):hover { text-decoration: underline; }
 .mockdoc-trail__item.is-current { color: var(--ink-soft); font-weight: 700; cursor: default; }
-.mockdoc-trail__sep { color: var(--ink-soft); opacity: 0.5; font-size: 12px; flex-shrink: 0; }
+.mockdoc-trail__sep { color: var(--ink-soft); opacity: 0.5; font-size: 12px; }
 
 .mockdoc {
   --docs-link: #0969DA;
@@ -1061,8 +1127,9 @@ a { color: inherit; text-decoration: none; cursor: none; }
   .canvas-main { padding: 84px 14px 48px; }
   .hub-hero { margin-bottom: 32px; gap: 8px; }
   .hr-toolbar { padding: 8px 12px; }
-  .hr-toolbar__goal { font-size: 12px; }
-  .hr-toolbar__timer { font-size: 20px; }
+  .hr-objective { flex-wrap: wrap; }
+  .hr-objective__goal { font-size: 12px; }
+  .hr-objective__timer { font-size: 20px; }
   .hr-toolbar .doodle-btn.sm { padding: 8px 12px; font-size: 11px; }
   .mockdoc-trail__item { max-width: 90px; }
   .hub-hero .doodle-tag { font-size: 16px; }
@@ -1072,7 +1139,7 @@ a { color: inherit; text-decoration: none; cursor: none; }
   /* Fixed corner widgets: still fixed, just tucked in tighter so a small
      viewport doesn't feel like it's losing real content space to them. */
   .player-badge { top: 12px; right: 12px; }
-  .dev-mode-panel { top: 58px; right: 12px; max-width: 170px; font-size: 10px; }
+  .dev-mode-panel { top: 72px; right: 12px; max-width: 170px; font-size: 10px; } /* badge bottom ~60px + gap, same fix as desktop */
   .utility-dock { bottom: 14px; left: 14px; }
   .utility-dock .doodle-btn.sm { padding: 8px 12px; font-size: 11px; }
   .track-mascot, #trackMascot.eggable { bottom: 14px; right: 14px; width: 72px; height: 72px; }
