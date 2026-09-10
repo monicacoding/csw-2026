@@ -474,3 +474,13 @@ Verified live end-to-end: sidebar genuinely absent, Back disabled on the start p
 - **Reorganized into two sections (point 5).** `.hr-objective` (timer, start/goal — now each on their own labeled line, "START"/"GOAL" in small caps — and Found It!) groups everything about *finishing* the run; `.hr-nav` (Back + the Path toggle) groups everything about *backtracking*, visually separated by a dashed divider and deliberately plainer styling (smaller, unbolded) so the two read as primary vs. secondary at a glance, not just by position.
 
 Verified live end-to-end on both desktop and a 375px mobile viewport (including catching and re-confirming past a one-off screenshot render glitch during the resize itself, unrelated to the actual layout).
+
+## Polish pass #26 — a way to back out of the Found It! word prompt
+
+Clicking Found It! stopped the timer and moved straight to a word-entry screen with no way out except submitting (right or wrong) — no way to say "actually let me double check that word." Added a second button there, "← Back to Article" (ghost-styled, under the primary Submit), that returns to `renderBrowsing` without touching anything submission-related.
+
+Concretely: it doesn't submit, doesn't call `ctx.done()`, doesn't touch `history` (so it lands back on the exact page Found It! was clicked from — always the goal page, since that's the only way to reach this screen), doesn't re-roll `assignedCandidate` (still the same highlighted word), and doesn't affect `ctx.lock()`'s modal-level lockout at all — it only ever moves between this activity's own two internal screens, both already inside the locked modal.
+
+The one real piece of state this touches is the timer: Found It! calls `clearInterval` on it, so backing out needs to genuinely resume it, not just leave it stopped. `timerInterval` changed from a `const` set once to a `let` behind a small `startTimerTick()` helper, callable again from the Back button; `startTime` itself is never touched, so the displayed time (and the elapsed time actually scored whenever they do submit) keeps counting through a cancel-and-return exactly as if Found It! had never been clicked.
+
+Verified live: clicked Found It!, confirmed the word prompt has both buttons, clicked Back to Article, confirmed landing back on the goal page with the same highlighted word still shown and the timer visibly advancing again (not reset, not stuck) — then confirmed Found It! → Submit still works correctly afterward (`wordCorrect: true`, real elapsed time including the time spent on the round trip), and that Back/trail navigation both still work normally post-cancel with nothing left in a broken state.
