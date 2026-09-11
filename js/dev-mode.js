@@ -130,6 +130,22 @@ const DevMode = (() => {
       try {
         await Store.setWeekConfig(weekStart, weekEnd);
         applyWeekDates(weekStart, weekEnd);
+        // BUG FIX: `todayLocalDateString()` checks this override before
+        // anything else, unconditionally — a day-jump preview clicked at
+        // any earlier point (even in a long-past testing session) sits in
+        // localStorage indefinitely, with no expiry and nothing here ever
+        // clearing it on its own. That silently kept "today" pinned to
+        // whatever was last clicked (say, an old "Post-Week" jump from
+        // testing the previous default dates) even after saving brand new
+        // real dates meant to represent the actual current day — the
+        // classic reported symptom of "I set today's real week and Friday
+        // still shows as if the week's already over," even though
+        // isWeekLocked/applyWeekDates themselves were never the problem.
+        // Saving real dates is explicitly NOT a preview — clear any
+        // lingering preview override so this browser (like every other
+        // user's) goes back to using the real system date, unless MIFN
+        // deliberately picks a day-jump preview again afterward.
+        localStorage.removeItem('csw2026_preview_date');
         showHub();
         Toast.show('📅 Real week dates updated — this now applies for everyone.', 'success');
       } catch (err) {
