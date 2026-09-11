@@ -104,6 +104,17 @@ service cloud.firestore {
       allow list: if true;
     }
 
+    // TEMPORARY — the real Customer Service Week start/end dates, set via
+    // Developer Mode (js/dev-mode.js, MIFN-only client-side gate) and read
+    // by every user's app on load (Store.getWeekConfig/setWeekConfig in
+    // js/store.js). Not keyed by a 4-letter user code — a single shared
+    // config doc, `csw2026Week` — so no code-format check applies here.
+    // Delete this whole block once the event's real dates are fixed for
+    // good and this mechanism is removed.
+    match /appConfig/{docId} {
+      allow read, write: if true;
+    }
+
     // Everything else stays locked down.
     match /{document=**} {
       allow read, write: if false;
