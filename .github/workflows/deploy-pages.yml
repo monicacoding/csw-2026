@@ -1,0 +1,74 @@
+# ---------------------------------------------------------------------------
+# Deploys this repo to GitHub Pages on every push to main.
+#
+# No build step needed — this is a static HTML/CSS/JS site with no framework
+# or bundler; see build.js's own header comment for why "build" here means
+# "verify," not "bundle." The repo root already IS the production output
+# (same reasoning vercel.json's `outputDirectory: "."` relies on), so this
+# workflow's only real jobs are: (1) run that existing verify step so a
+# broken asset reference or a JS syntax error fails the deploy loudly
+# instead of silently publishing something broken, and (2) upload the repo
+# root as the Pages artifact and publish it.
+#
+# One-time manual step this workflow can't do on its own: in this repo's
+# own Settings → Pages, "Build and deployment → Source" must be set to
+# "GitHub Actions" (not "Deploy from a branch") for this workflow to be the
+# thing that actually publishes — see README.md's "Deploying" section.
+#
+# No leading-slash absolute asset paths exist anywhere in this repo (every
+# <script src>/<link href> and CSS @import/url() is relative — verified via
+# grep across html/css/js as part of diagnosing why a previous deploy here
+# rendered broken while the same commit looked correct on Vercel), so this
+# deploys correctly whether Pages serves it from a user/org root or a
+# project subpath (https://<user>.github.io/<repo>/) — no base-path
+# configuration to set, unlike a Vite/CRA-style build.
+# ---------------------------------------------------------------------------
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # Lets this be re-run manually from the Actions tab without needing a new
+  # commit — e.g. to force a redeploy after fixing the Pages source setting
+  # itself, or to confirm this workflow (not a stale prior deployment) is
+  # what's currently live.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment in flight at a time; a newer push cancels an
+# in-progress older one rather than racing it.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Fails the whole deploy if index.html references a missing local
+      # asset or any .js file under js//data/ has a syntax error — the same
+      # check `npm run build`/`vercel.json` already run before a Vercel
+      # deploy, so both hosts are held to the same bar.
+      - run: node build.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
