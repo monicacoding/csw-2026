@@ -4,16 +4,10 @@
 // activity/leaderboard/secret view, and the finish-line celebration.
 // ---------------------------------------------------------------------------
 
-// ===========================================================================
-// DEV_MODE — gates the entire Developer Mode panel (renderDevModePanel,
-// below): the day-jump preview buttons and the Reset button. This flag, and
-// everything it guards, MUST NOT SHIP in the production/real-event build —
-// flip this single constant to false (or delete it and everything gated on
-// it) before that deploy. Kept as one obvious, greppable constant at the
-// very top of the file specifically so it's trivial to find later, rather
-// than buried inline where a future pass could miss it.
-// ===========================================================================
-const DEV_MODE = true;
+// Developer Mode itself (the DEV_MODE flag, the MIFN-only visibility gate,
+// the day-jump/Reset panel, and the real week-date configuration control)
+// now all live in js/dev-mode.js — see that file's own header comment for
+// why it's grouped there and why all of it is temporary scaffolding.
 
 const Toast = (() => {
   let el = null;
@@ -112,6 +106,7 @@ const App = (() => {
   async function init() {
     Cursor.init();
     Ambient.init();
+    await loadWeekConfig();
 
     const code = Auth.getCurrentCode();
     if (code) {
@@ -121,6 +116,28 @@ const App = (() => {
       if (!resumed) maybeShowOnboarding();
     } else {
       showLogin();
+    }
+  }
+
+  // TEMPORARY — see js/dev-mode.js's header comment for the full picture.
+  // Applies the globally-configured real week dates (if MIFN has ever set
+  // them via Developer Mode) before anything else renders, so this user's
+  // very first paint already reflects the real calendar rather than the
+  // default hardcoded CSW_SCHEDULE dates for even one frame. Runs
+  // unconditionally, logged in or not — the login screen itself doesn't
+  // depend on schedule dates today, but there's no reason to special-case
+  // it, and it keeps this one call site simple. A missing/unreachable
+  // config (nothing ever saved yet, or the appConfig rule not deployed —
+  // Store.getWeekConfig already guards that with its own timeout) just
+  // leaves CSW_SCHEDULE's defaults in place, silently.
+  async function loadWeekConfig() {
+    try {
+      const config = await Store.getWeekConfig();
+      if (config?.weekStart && config?.weekEnd) {
+        applyWeekDates(config.weekStart, config.weekEnd);
+      }
+    } catch (e) {
+      console.warn('Could not load the global week-date configuration', e);
     }
   }
 
@@ -567,63 +584,12 @@ const App = (() => {
     });
   }
 
-  // The day-jump + Reset panel. Everything in this function is dev-only —
-  // see the DEV_MODE constant at the top of this file, which is the single
-  // switch that must flip to false (or have this whole panel deleted
-  // outright) before shipping the real event build. When it's off, this
-  // just tears down any panel a previous DEV_MODE=true render left behind
-  // and returns — nothing else in the hub depends on this panel existing.
+  // Developer Mode's panel now lives entirely in js/dev-mode.js — this is
+  // just the hand-off point, called from showHub() below like before.
+  // `currentUser`/`showHub`/`refreshUser` are this module's own private
+  // state/functions; DevMode never reaches for them directly.
   function renderDevModePanel() {
-    if (!DEV_MODE) {
-      document.getElementById('devModePanel')?.remove();
-      return;
-    }
-
-    let panel = document.getElementById('devModePanel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'devModePanel';
-      panel.className = 'dev-mode-panel';
-      document.body.appendChild(panel);
-    }
-    const currentOverride = localStorage.getItem('csw2026_preview_date') || '';
-    const dayBtns = CSW_SCHEDULE.map((d) =>
-      `<button data-date="${d.date}" class="${d.date === currentOverride ? 'is-active' : ''}">${d.label.slice(0,3)}</button>`
-    ).join('');
-    // One more jump: the day after the week's hard end date, so the global
-    // view-only lockout (see data/schedule.js's isWeekLocked) is actually
-    // reachable for testing, the same way the day buttons make each
-    // individual unlock reachable.
-    const postWeekDate = addDaysToDateString(CSW_WEEK_END_DATE, 1);
-    panel.innerHTML = `
-      <span class="dev-mode-panel__label">🛠️ Developer Mode</span>
-      ${dayBtns}
-      <button data-date="${postWeekDate}" class="${postWeekDate === currentOverride ? 'is-active' : ''}">Post-Week</button>
-      <button data-date="">Real</button>
-      <button class="dev-mode-panel__reset" id="devResetBtn" title="Wipes YOUR OWN test data — submissions, scores, PIN, mini-game progress — back to a brand new account">⚠ Reset</button>
-    `;
-    panel.querySelectorAll('button[data-date]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (btn.dataset.date) localStorage.setItem('csw2026_preview_date', btn.dataset.date);
-        else localStorage.removeItem('csw2026_preview_date');
-        showHub();
-      });
-    });
-    // Destructive, so it's gated behind a real confirm() rather than firing
-    // on a single accidental click — see Store.resetUserProgress's own
-    // comment for exactly what this does and doesn't touch (this user's own
-    // documents only, never another tester's).
-    panel.querySelector('#devResetBtn').addEventListener('click', async () => {
-      const confirmed = confirm(
-        `Reset all test data for "${currentUser.code}"?\n\n` +
-        `This wipes YOUR OWN submissions, scores, PIN, mini-game progress, and the secret leaderboard unlock — back to a brand new account. This cannot be undone.`
-      );
-      if (!confirmed) return;
-      await Store.resetUserProgress(currentUser.code);
-      await refreshUser();
-      showHub();
-      Toast.show('🔄 Your test data has been reset.', 'success');
-    });
+    DevMode.render(currentUser, { showHub, refreshUser });
   }
 
   // The global view-only banner (point 1's hard end-of-week switch) — shown

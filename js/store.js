@@ -17,6 +17,8 @@
 //   photoFinishEntries/{CODE}            + votes/{VOTER_CODE} subcollection
 //   nominations/{CODE}
 //   minigameEntries/{CODE}
+//   appConfig/csw2026Week                 TEMPORARY — global week start/end
+//                                         dates, see getWeekConfig below
 // ---------------------------------------------------------------------------
 
 const Store = (() => {
@@ -295,6 +297,44 @@ const Store = (() => {
     await FirestoreDB.deleteDoc('snapJudgementProgress', code);
   }
 
+  // ---- Global week-date configuration (TEMPORARY — Developer Mode, MIFN-
+  // only; see js/dev-mode.js's header comment for the full picture) --------
+  // A single shared doc — not per-user, unlike everything else in this file
+  // — holding the real Customer Service Week start/end dates once MIFN sets
+  // them via Developer Mode. Every user's app reads this once on load and
+  // applies it via data/schedule.js's applyWeekDates, rather than each
+  // user only ever seeing the hardcoded default dates baked into
+  // CSW_SCHEDULE. Delete both functions (and the appConfig collection
+  // entirely) once the event's real dates are fixed for good.
+  //
+  // Both wrapped in a local timeout guard, same rationale as js/games.js's
+  // withTimeout: a security rule that hasn't been deployed yet (see
+  // firestore.rules' `appConfig` entry) can leave the Firestore SDK hanging
+  // indefinitely instead of rejecting, on a get *or* a set. Guarded here
+  // once, rather than duplicated at each of this pair's two call sites
+  // (js/app.js's app-load read, js/dev-mode.js's Save-button write).
+  function withTimeoutFallback(promise, ms, fallback) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(fallback), ms);
+      promise.then(
+        (v) => { clearTimeout(timer); resolve(v); },
+        () => { clearTimeout(timer); resolve(fallback); },
+      );
+    });
+  }
+
+  async function getWeekConfig() {
+    return withTimeoutFallback(FirestoreDB.getDoc('appConfig', 'csw2026Week'), 4000, null);
+  }
+
+  async function setWeekConfig(weekStart, weekEnd) {
+    const ok = await withTimeoutFallback(
+      FirestoreDB.setDoc('appConfig', 'csw2026Week', { weekStart, weekEnd, updatedAt: FirestoreDB.now() }, false).then(() => true),
+      4000, false,
+    );
+    if (!ok) throw new Error('Timed out saving the week configuration — appConfig may not be deployed yet in firestore.rules.');
+  }
+
   async function getLeaderboard(collection, { orderBy, direction = 'desc', limit = 50 }) {
     let rows = await FirestoreDB.listCollection(collection);
     rows.sort((a, b) => {
@@ -466,6 +506,8 @@ const Store = (() => {
     saveSnapSession,
     getSnapSession,
     clearSnapSession,
+    getWeekConfig,
+    setWeekConfig,
     getLeaderboard,
     getCombinedLeaderboard,
     getPhotoFinishEntries,

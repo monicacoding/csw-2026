@@ -123,10 +123,55 @@ function dayStatus(day, todayStr = todayLocalDateString()) {
 // first, before any per-activity locked/active/expired logic). Derived from
 // the schedule itself (the last day's date) rather than hardcoded a second
 // time, so adding/removing a day here keeps it correct automatically.
-const CSW_WEEK_END_DATE = CSW_SCHEDULE[CSW_SCHEDULE.length - 1].date;
+//
+// `let`, not `const` — see applyWeekDates below (TEMPORARY, js/dev-mode.js)
+// for why this needs to be reassignable, not frozen at load time.
+let CSW_WEEK_END_DATE = CSW_SCHEDULE[CSW_SCHEDULE.length - 1].date;
 
 function isWeekLocked(todayStr = todayLocalDateString()) {
   return todayStr > CSW_WEEK_END_DATE;
+}
+
+// ---------------------------------------------------------------------------
+// TEMPORARY SCAFFOLDING — real week-date configuration, driven by Developer
+// Mode (js/dev-mode.js, MIFN-only). Delete this function, its `appConfig`
+// Firestore doc (js/store.js's getWeekConfig/setWeekConfig), and the call
+// sites in js/app.js/js/dev-mode.js entirely once the real event's dates
+// are fixed for good — at that point CSW_SCHEDULE's own literal `date`
+// fields above are simply the permanent schedule again, exactly as they
+// were before this existed.
+//
+// Reassigns every CSW_SCHEDULE day's own `date` field IN PLACE (mutating
+// the existing array/objects rather than replacing them, since everything
+// else in the app — js/state.js's activityTileState, js/app.js's track/
+// activity-board rendering, findActivityDay, etc. — holds a reference to
+// this exact array) and recomputes CSW_WEEK_END_DATE to match. Every place
+// that already reads CSW_SCHEDULE/CSW_WEEK_END_DATE — day-gating,
+// per-activity deadlines (js/state.js: closesAfter || day.date), and
+// isWeekLocked's post-week check — picks up the new dates automatically,
+// with no separate update path needed for any of them.
+//
+// `weekStart` becomes the first day's (Monday's) date exactly; `weekEnd`
+// becomes the last day's (Friday's) date exactly. The 3 middle days are
+// spaced proportionally across whatever span that leaves — in the normal
+// case (weekEnd exactly 4 days after weekStart, a standard Monday–Friday
+// week) that's just 1/2/3 days after weekStart, same as the hardcoded
+// defaults; a different span stretches or compresses them evenly rather
+// than assuming exactly 4 days apart.
+function applyWeekDates(weekStart, weekEnd) {
+  const start = new Date(`${weekStart}T00:00:00`);
+  const end = new Date(`${weekEnd}T00:00:00`);
+  const totalDays = Math.round((end - start) / 86400000);
+  const lastIndex = CSW_SCHEDULE.length - 1;
+  CSW_SCHEDULE.forEach((day, i) => {
+    const offset = lastIndex === 0 ? 0 : Math.round((i * totalDays) / lastIndex);
+    day.date = addDaysToDateString(weekStart, offset);
+  });
+  CSW_WEEK_END_DATE = CSW_SCHEDULE[lastIndex].date;
+  // `window.CSW_WEEK_END_DATE` is a one-time snapshot copy (see the bottom
+  // of this file) — reassigning the local `let` above doesn't update it on
+  // its own, and js/app.js's dev panel reads the global directly.
+  if (typeof window !== 'undefined') window.CSW_WEEK_END_DATE = CSW_WEEK_END_DATE;
 }
 
 // '2026-10-09' + 1 -> '2026-10-10'. Local-time date arithmetic (no UTC
@@ -176,4 +221,5 @@ if (typeof window !== 'undefined') {
   window.CSW_WEEK_END_DATE = CSW_WEEK_END_DATE;
   window.isWeekLocked = isWeekLocked;
   window.addDaysToDateString = addDaysToDateString;
+  window.applyWeekDates = applyWeekDates; // TEMPORARY — see that function's own header comment
 }
