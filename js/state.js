@@ -31,8 +31,8 @@ const AppState = (() => {
 
   // A day can now carry more than one remote activity (Race Day Trivia
   // alongside that day's other activity, most days) — this returns, per
-  // day, the *remote* activities (on-site ones like Victory Lap Party have
-  // no submission state to track, so they're not part of this) each with
+  // day, the *remote* activities (on-site ones like Cake have no
+  // submission state to track, so they're not part of this) each with
   // their own individual tileState, plus a day-level aggregate `tileState`
   // for the timeline marker: 'done' only once every remote activity that
   // day is done, otherwise whatever the least-finished state present is
