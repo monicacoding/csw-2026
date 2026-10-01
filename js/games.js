@@ -1006,7 +1006,22 @@ const Games = (() => {
       // nomination emoji picker below), write a caption, submit. The grid
       // scrolls internally (see .pf-template-grid in css/sketch.css) so 40
       // thumbnails don't blow out the modal's own height.
+      //
+      // The explainer below is new — same `.game-explainer` block/style
+      // every other activity's pre-session intro already uses (Hyperlink
+      // Race, Snap Judgement, Race Day Trivia), just placed ahead of a form
+      // instead of ahead of a "Start" button, since Photo Finish has no
+      // locked session to start. Only shown here, in the one state where
+      // there's actually a template to pick — not on the already-submitted,
+      // week-locked, or view-only messages above, same as how those other
+      // activities' explainers never show once a session's already done.
       submitArea.innerHTML = `
+        <div class="game-explainer">
+          <p>🎯 <span><strong>Goal:</strong> a lighthearted caption contest — pick the template that best captures a funny or relatable customer-service moment.</span></p>
+          <p>🖼️ <span>Choose <strong>one template</strong> from the grid below, then add your own <strong>caption</strong> to go with it.</span></p>
+          <p>🗳️ <span>Once it's in, see how the rest of the team votes for their favorites down in the Gallery.</span></p>
+          <p>☝️ <span>It's <strong>one submission per person</strong> — make it count!</span></p>
+        </div>
         <div class="field">
           <label>Pick a template</label>
           <div class="pf-template-grid" id="pfTemplateGrid">
