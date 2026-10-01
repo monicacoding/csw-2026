@@ -10,7 +10,12 @@
 // everywhere automatically, no separate list to maintain.
 //   type: 'remote' — lives in the app, opens as a modal, has a stable `id`
 //   type: 'onsite' — happens in person, not tracked by the app, no `id`
-//     (informational only — shown in the hover popover, not the board)
+//     (informational only — shown in the hover popover, not the board).
+//     Optional `description`/`time` strings render as extra lines under
+//     the title in that same popover (js/app.js's dayDetailInnerHTML) —
+//     both are purely cosmetic detail from the event calendar (what the
+//     perk is, what time window it's offered), skipped entirely for any
+//     item that omits them, including every `remote` activity.
 // Race Day Trivia now runs every day (a new 5-question set each day — see
 // data/trivia-questions.js's TRIVIA_BY_DAY, keyed by this file's day `id`s),
 // so it appears on all five days alongside that day's other activity, if
@@ -39,6 +44,7 @@ const CSW_SCHEDULE = [
     activities: [
       { id: 'triviaTue', title: 'Race Day Trivia', type: 'remote' },
       { id: 'hyperlinkRace', title: 'Hyperlink Race', type: 'remote' },
+      { title: 'Pit Stop Massage', type: 'onsite', description: '5-minute chair massages', time: 'Morning & Afternoon' },
     ],
   },
   {
@@ -50,6 +56,7 @@ const CSW_SCHEDULE = [
     activities: [
       { id: 'triviaWed', title: 'Race Day Trivia', type: 'remote' },
       { id: 'photoFinish', title: 'Photo Finish', type: 'remote' },
+      { title: 'Refuel & Go', type: 'onsite', description: 'Assorted mini sweet & savory bites', time: 'Afternoon' },
     ],
   },
   {
@@ -61,6 +68,13 @@ const CSW_SCHEDULE = [
     activities: [
       { id: 'triviaThu', title: 'Race Day Trivia', type: 'remote' },
       { id: 'snapJudgement', title: 'Snap Judgement', type: 'remote' },
+      // Two separate on-site items today, not one — see the calendar this
+      // was synced from. Guided stretching has two distinct time windows
+      // (morning session, afternoon session), so `time` carries both.
+      { title: 'The Final Stretch', type: 'onsite', description: 'Guided stretching session', time: '11:00–12:00 & 14:00–15:00' },
+      // Moved here from Monday (see Polish pass changelog) — same item,
+      // just synced to the day the finalized calendar actually has it on.
+      { title: 'Starting Line Treats', type: 'onsite', description: 'Boles de Berlim (Portuguese custard doughnuts)', time: 'Afternoon' },
     ],
   },
   {
@@ -77,8 +91,9 @@ const CSW_SCHEDULE = [
       // `openAllWeek: true` + `closesAfter: '2026-10-09'` back on here
       // to restore the old open-all-week behavior if preferred.)
       { id: 'nomination', title: 'Who Went The Extra Mile?', type: 'remote' },
-      { title: 'Victory Lap Party', type: 'onsite' },
-      { title: 'Cake', type: 'onsite' },
+      // Victory Lap Party removed entirely — not on the finalized calendar
+      // this was synced from. Cake is Friday's only on-site item now.
+      { title: 'Cake', type: 'onsite', description: 'Celebratory themed cake', time: 'Afternoon' },
     ],
   },
 ];

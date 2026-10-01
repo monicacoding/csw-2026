@@ -620,11 +620,19 @@ const App = (() => {
     const itemsHTML = d.day.activities.map((a) => {
       const typeClass = a.type === 'onsite' ? 'onsite' : 'remote';
       const typeLabel = a.type === 'onsite' ? 'On-Site' : 'Remote';
+      // `description`/`time` — see data/schedule.js's own comment on them —
+      // are both optional and purely cosmetic, so an activity that omits
+      // either (every `remote` one, and any `onsite` one without a time
+      // window) just renders the title/type row with nothing extra below.
+      const descHTML = a.description ? `<div class="track-marker-popover__item-desc">${a.description}</div>` : '';
+      const timeHTML = a.time ? `<div class="track-marker-popover__item-time">☀️ ${a.time}</div>` : '';
       return `<div class="track-marker-popover__item">
                 <div class="track-marker-popover__item-row">
                   <span class="track-marker-popover__activity">${a.title}</span>
                   <span class="track-marker-popover__type ${typeClass}">${typeLabel}</span>
                 </div>
+                ${descHTML}
+                ${timeHTML}
               </div>`;
     }).join('');
     return `<div class="track-marker-popover__day">${d.day.label} · ${formatShortDate(d.day.date)}</div>
@@ -1236,7 +1244,7 @@ const App = (() => {
           <div style="font-size:28px;">🎉 🏁 🎉</div>
           <div class="mascot-bob" style="display:inline-block;"><img src="${Mascot.src('finish')}" alt="Mascot crossing the finish line" /></div>
           <h1>You Went the Extra Mile!</h1>
-          <p style="color:var(--ink-soft);font-size:16px;">You completed the full Bingo Card — every square checked. See you at Friday's Victory Lap Party!</p>
+          <p style="color:var(--ink-soft);font-size:16px;">You completed the full Bingo Card — every square checked. See you Friday — there's cake!</p>
           <div style="display:flex;gap:14px;justify-content:center;margin-top:10px;">
             <button class="doodle-btn" id="flLeaderboard">See the Leaderboard</button>
             <button class="doodle-btn ghost" id="flClose">Back to Hub</button>
