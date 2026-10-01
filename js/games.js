@@ -970,17 +970,57 @@ const Games = (() => {
   // ---------------- Photo Finish (Wednesday · The Halfway Mile) ----------------
   // Reachable in three distinct access modes now (see js/app.js's
   // activityClickPolicy, which decides which of these ever gets this far):
-  //  - normal (active, not yet submitted): submit form + Gallery, as always.
-  //  - already submitted: no form, Gallery + voting, as always — stays
-  //    reachable indefinitely, including past week-end (ctx.weekLocked).
+  //  - normal (active, not yet submitted): a short explainer screen first
+  //    (renderPhotoFinishIntro), then submit form + Gallery once "Let's Go"
+  //    is clicked — same two-step shape Hyperlink Race/Snap Judgement/Race
+  //    Day Trivia already use, just without a locked session behind it.
+  //  - already submitted: no intro, no form — straight to Gallery + voting,
+  //    as always — stays reachable indefinitely, including past week-end
+  //    (ctx.weekLocked).
   //  - ctx.viewOnly: this user's own deadline passed without a submission,
   //    but the week itself hasn't ended — browsing shouldn't be gated
   //    behind having personally participated, so Gallery + voting still
-  //    work, just with no submit form.
+  //    work, just with no submit form (and no intro — there's nothing left
+  //    to introduce once submitting isn't an option).
   // ctx.weekLocked (the global end-of-week switch) overrides voting in every
   // one of those: once it's true, this is strictly read-only — no new
   // submissions (already blocked upstream) and no new votes either.
   async function photoFinish(body, user, day, ctx) {
+    const already = await Store.hasSubmitted('photoFinishEntries', user.code);
+    // The intro is skipped entirely for every state except "about to
+    // submit" — same rule every other activity's own intro already follows
+    // (never shown once a session's done, locked, or past its window).
+    if (already || ctx.weekLocked || ctx.viewOnly) {
+      await renderPhotoFinishScreen(body, user, day, ctx, already);
+      return;
+    }
+    renderPhotoFinishIntro(body, user, day, ctx);
+  }
+
+  // Full-screen explainer + a single "Let's Go" button — same shape as
+  // renderHyperlinkIntro/renderSnapIntro above, just not followed by a
+  // locked session (Photo Finish has no timer/cheating-risk to guard
+  // against, so there's nothing to ctx.lock() here). Clicking through goes
+  // straight to the real screen below; this step is never shown again once
+  // that happens, same as every other activity's own intro.
+  function renderPhotoFinishIntro(body, user, day, ctx) {
+    body.innerHTML = modalHeader(day, 'Photo Finish') + `
+      <div class="game-explainer">
+        <p>🎯 <span><strong>Goal:</strong> a lighthearted caption contest — pick the template that best captures a funny or relatable customer-service moment.</span></p>
+        <p>🖼️ <span>Choose <strong>one template</strong> from the grid below, then add your own <strong>caption</strong> to go with it.</span></p>
+        <p>🗳️ <span>Once it's in, see how the rest of the team votes for their favorites down in the Gallery.</span></p>
+        <p>☝️ <span>It's <strong>one submission per person</strong> — make it count!</span></p>
+      </div>
+      <button class="doodle-btn" id="pfStart" style="width:100%;">Let's Go</button>`;
+    body.querySelector('#pfStart').addEventListener('click', () => renderPhotoFinishScreen(body, user, day, ctx, false));
+  }
+
+  // The actual game screen — submit form (or the already-submitted/week-
+  // locked/view-only message in its place) + Gallery below it. Looks
+  // exactly like it did before the explainer existed; the explainer now
+  // lives only in renderPhotoFinishIntro above, one step earlier, never
+  // inline here.
+  async function renderPhotoFinishScreen(body, user, day, ctx, already) {
     body.innerHTML = modalHeader(day, 'Photo Finish') + `
       <div id="pfSubmitArea"></div>
       <h3 style="color:var(--navy);margin:22px 0 10px;font-size:16px;">Gallery</h3>
@@ -988,7 +1028,6 @@ const Games = (() => {
       <div id="pfGallery" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;"></div>`;
 
     const submitArea = body.querySelector('#pfSubmitArea');
-    const already = await Store.hasSubmitted('photoFinishEntries', user.code);
     if (already) {
       submitArea.innerHTML = `<p style="color:var(--success);font-weight:700;">✅ You've already submitted your Photo Finish entry!</p>`;
     } else if (ctx.weekLocked) {
@@ -1006,22 +1045,7 @@ const Games = (() => {
       // nomination emoji picker below), write a caption, submit. The grid
       // scrolls internally (see .pf-template-grid in css/sketch.css) so 40
       // thumbnails don't blow out the modal's own height.
-      //
-      // The explainer below is new — same `.game-explainer` block/style
-      // every other activity's pre-session intro already uses (Hyperlink
-      // Race, Snap Judgement, Race Day Trivia), just placed ahead of a form
-      // instead of ahead of a "Start" button, since Photo Finish has no
-      // locked session to start. Only shown here, in the one state where
-      // there's actually a template to pick — not on the already-submitted,
-      // week-locked, or view-only messages above, same as how those other
-      // activities' explainers never show once a session's already done.
       submitArea.innerHTML = `
-        <div class="game-explainer">
-          <p>🎯 <span><strong>Goal:</strong> a lighthearted caption contest — pick the template that best captures a funny or relatable customer-service moment.</span></p>
-          <p>🖼️ <span>Choose <strong>one template</strong> from the grid below, then add your own <strong>caption</strong> to go with it.</span></p>
-          <p>🗳️ <span>Once it's in, see how the rest of the team votes for their favorites down in the Gallery.</span></p>
-          <p>☝️ <span>It's <strong>one submission per person</strong> — make it count!</span></p>
-        </div>
         <div class="field">
           <label>Pick a template</label>
           <div class="pf-template-grid" id="pfTemplateGrid">
@@ -1065,11 +1089,12 @@ const Games = (() => {
           scoreDelta: 0, data: { caption, templateId: selectedTemplateId, votes: 0 },
         });
         // Update hub state in the background but keep the modal open — then
-        // re-run this same function so it re-renders as "already submitted"
-        // with a fresh Gallery that now includes this entry, right in place.
+        // re-run this same screen (not the intro — already=true skips it)
+        // so it re-renders as "already submitted" with a fresh Gallery that
+        // now includes this entry, right in place.
         await ctx.refresh();
         Toast.show('🏁 Entry submitted — check out the Gallery!', 'success');
-        await photoFinish(body, user, day, ctx);
+        await renderPhotoFinishScreen(body, user, day, ctx, true);
       });
     }
 
