@@ -96,35 +96,6 @@ const Games = (() => {
     }[c]));
   }
 
-  // Resizes an uploaded image client-side (max dimension + JPEG re-encode)
-  // before turning it into a data URL — keeps Photo Finish submissions from
-  // bloating the mock localStorage-backed data layer.
-  function fileToResizedDataUrl(file, maxDim = 480, quality = 0.72) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error('Could not read that file.'));
-      reader.onload = () => {
-        const img = new Image();
-        img.onerror = () => reject(new Error("That file doesn't look like an image."));
-        img.onload = () => {
-          let { width, height } = img;
-          if (width > maxDim || height > maxDim) {
-            const scale = maxDim / Math.max(width, height);
-            width = Math.round(width * scale);
-            height = Math.round(height * scale);
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', quality));
-        };
-        img.src = reader.result;
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
   // ---------------- Hyperlink Race (Tuesday · Picking Up The Pace) ----------------
   // Self-contained now — no real external site. The "docs" being hunted
   // through are data/mock-docs.js's 18 fictional pages, rendered as
@@ -1029,55 +1000,54 @@ const Games = (() => {
     } else if (ctx.viewOnly) {
       submitArea.innerHTML = `<p style="color:var(--ink-soft);font-weight:700;">⏳ The submission window for Photo Finish has closed — but you can still browse the gallery and vote below!</p>`;
     } else {
+      // Template picker, not a free-form upload — PHOTO_FINISH_TEMPLATES
+      // (data/photo-templates.js) is the entire "folder" of choices; pick
+      // exactly one (click toggles selection, same pattern as the
+      // nomination emoji picker below), write a caption, submit. The grid
+      // scrolls internally (see .pf-template-grid in css/sketch.css) so 40
+      // thumbnails don't blow out the modal's own height.
       submitArea.innerHTML = `
         <div class="field">
-          <label>Your photo</label>
-          <input id="pfImageInput" type="file" accept="image/*" class="visually-hidden" />
-          <label for="pfImageInput" class="doodle-btn ghost pf-upload-btn" id="pfUploadLabel">📸 Choose a Photo</label>
-        </div>
-        <div id="pfPreviewWrap" style="display:none;margin:10px 0;">
-          <img id="pfPreview" style="width:100%;max-height:200px;object-fit:cover;border-radius:14px;border:2.5px solid var(--navy);" />
+          <label>Pick a template</label>
+          <div class="pf-template-grid" id="pfTemplateGrid">
+            ${PHOTO_FINISH_TEMPLATES.map((t) => `
+              <button type="button" class="pf-template-option" data-template-id="${t.id}" title="${escapeHtml(t.alt)}">
+                <img src="${t.src}" alt="${escapeHtml(t.alt)}" loading="lazy" />
+              </button>`).join('')}
+          </div>
         </div>
         <div class="field"><label>Your caption</label><textarea id="pfCaption" rows="3" placeholder="Make us laugh…"></textarea></div>
-        <button class="doodle-btn" id="pfSubmit" style="width:100%;" disabled>Add a photo and caption to submit</button>`;
+        <button class="doodle-btn" id="pfSubmit" style="width:100%;" disabled>Pick a template and add a caption to submit</button>`;
 
-      let imageDataUrl = null;
+      let selectedTemplateId = null;
       const submitBtn = submitArea.querySelector('#pfSubmit');
       const captionInput = submitArea.querySelector('#pfCaption');
-      const uploadLabel = submitArea.querySelector('#pfUploadLabel');
+      const templateGrid = submitArea.querySelector('#pfTemplateGrid');
 
       function refreshSubmitState() {
-        const ready = !!imageDataUrl && captionInput.value.trim().length > 0;
+        const ready = !!selectedTemplateId && captionInput.value.trim().length > 0;
         submitBtn.disabled = !ready;
-        submitBtn.textContent = ready ? 'Submit' : 'Add a photo and caption to submit';
+        submitBtn.textContent = ready ? 'Submit' : 'Pick a template and add a caption to submit';
       }
       captionInput.addEventListener('input', refreshSubmitState);
 
-      submitArea.querySelector('#pfImageInput').addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) { imageDataUrl = null; uploadLabel.textContent = '📸 Choose a Photo'; refreshSubmitState(); return; }
-        try {
-          imageDataUrl = await fileToResizedDataUrl(file);
-          const previewWrap = submitArea.querySelector('#pfPreviewWrap');
-          submitArea.querySelector('#pfPreview').src = imageDataUrl;
-          previewWrap.style.display = 'block';
-          uploadLabel.textContent = '📸 Photo Selected ✓';
-        } catch (err) {
-          Toast.show(err.message, 'error');
-          imageDataUrl = null;
-          uploadLabel.textContent = '📸 Choose a Photo';
-        }
-        refreshSubmitState();
+      templateGrid.querySelectorAll('.pf-template-option').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          templateGrid.querySelectorAll('.pf-template-option').forEach((b) => b.classList.remove('selected'));
+          btn.classList.add('selected');
+          selectedTemplateId = btn.dataset.templateId;
+          refreshSubmitState();
+        });
       });
 
       submitBtn.addEventListener('click', async (e) => {
         const caption = captionInput.value.trim();
-        if (!caption || !imageDataUrl) return;
+        if (!caption || !selectedTemplateId) return;
         e.target.disabled = true;
         e.target.textContent = 'Submitting…';
         await Store.submitEntry({
           collection: 'photoFinishEntries', code: user.code, bingoKey: 'photoFinish',
-          scoreDelta: 0, data: { caption, imageDataUrl, votes: 0 },
+          scoreDelta: 0, data: { caption, templateId: selectedTemplateId, votes: 0 },
         });
         // Update hub state in the background but keep the modal open — then
         // re-run this same function so it re-renders as "already submitted"
@@ -1096,15 +1066,25 @@ const Games = (() => {
     if (entries.length === 0) {
       grid.innerHTML = `<p style="color:var(--ink-soft);grid-column:1/-1;">No entries yet — be the first!</p>`;
     } else {
-      grid.innerHTML = entries.map((e) => `
+      grid.innerHTML = entries.map((e) => {
+        // `templateId` is the current (template-picker) shape;
+        // `imageDataUrl` is only ever present on an entry submitted before
+        // this round's switch away from free-form upload — rendered as-is
+        // rather than migrated, same precedent as every other "old entries
+        // keep working, read-only" case in this app (e.g. js/state.js's
+        // Cake/Victory Lap Party comment history).
+        const template = PHOTO_FINISH_TEMPLATES.find((t) => t.id === e.templateId);
+        const imgSrc = template?.src || e.imageDataUrl || '';
+        return `
         <div class="sketch-card" style="padding:14px;">
-          ${e.imageDataUrl ? `<img src="${e.imageDataUrl}" alt="" style="width:100%;height:120px;object-fit:cover;border-radius:12px;margin-bottom:8px;" />` : ''}
+          ${imgSrc ? `<img src="${imgSrc}" alt="" style="width:100%;height:120px;object-fit:cover;border-radius:12px;margin-bottom:8px;" />` : ''}
           <div style="font-weight:700;color:var(--navy);font-size:13px;margin-bottom:8px;">"${escapeHtml(e.caption)}"</div>
           <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--ink-soft);">
             <span>— ${escapeHtml(e.code)}</span>
             <button class="doodle-btn sm vote-btn" data-code="${e.id}" ${e.code === user.code ? 'disabled title="You can\'t vote for your own entry"' : ''}>▲ ${e.votes || 0}</button>
           </div>
-        </div>`).join('');
+        </div>`;
+      }).join('');
       grid.querySelectorAll('.vote-btn').forEach((btn) => {
         if (btn.disabled) return;
         // The global week-end lockout stops voting even for an already-

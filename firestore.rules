@@ -84,6 +84,20 @@ service cloud.firestore {
       }
     }
 
+    // A collectionGroup query (FirestoreDB.listCollectionGroup, used by
+    // Store.getAllTriviaEntries — js/export.js's Results export, Race Day
+    // Trivia tab) needs its OWN rule written against the subcollection name
+    // at the top level like this, with the `{path=**}` wildcard soaking up
+    // every parent segment — the nested `match /days/{dayId}` block above,
+    // scoped under one specific parent (`triviaEntries/{code}`), only ever
+    // governs a direct read of one user's own days subcollection, never a
+    // query spanning every user's. Without this, a collectionGroup('days')
+    // query 403s even though the single-user nested rule above looks like
+    // it should already cover it.
+    match /{path=**}/days/{dayId} {
+      allow list: if true;
+    }
+
     match /photoFinishEntries/{code} {
       allow get, write: if code.matches('^[A-Z]{4}$');
       allow list: if true;
