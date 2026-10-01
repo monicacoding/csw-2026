@@ -541,6 +541,7 @@ const App = (() => {
     Cursor.setGlyph(currentUser.cursorGlyph || '🏎️');
     renderPlayerBadge();
     renderDevModePanel();
+    renderAdminPanelButton();
     renderWeekLockedBanner();
     renderTrack();
     renderTriviaSection();
@@ -579,6 +580,7 @@ const App = (() => {
       currentUser = null;
       document.getElementById('playerBadge')?.remove();
       document.getElementById('devModePanel')?.remove();
+      document.getElementById('adminPanelDockBtn')?.remove();
       CursorPicker.close();
       showLogin();
     });
@@ -590,6 +592,13 @@ const App = (() => {
   // state/functions; DevMode never reaches for them directly.
   function renderDevModePanel() {
     DevMode.render(currentUser, { showHub, refreshUser });
+  }
+
+  // Admin Panel's own dock button — see js/admin-panel.js's header for why
+  // this, unlike Developer Mode, isn't MIFN-only: it checks the real admin
+  // list (Store.getAdminCodes), not a hardcoded short login.
+  function renderAdminPanelButton() {
+    AdminPanel.render(currentUser, { showHub, refreshUser });
   }
 
   // The global view-only banner (point 1's hard end-of-week switch) — shown

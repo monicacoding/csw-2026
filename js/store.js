@@ -15,10 +15,18 @@
 //   snapJudgementEntries/{CODE}
 //   triviaEntries/{CODE}/days/{DAY_ID}   subcollection — see submitTriviaDay
 //   photoFinishEntries/{CODE}            + votes/{VOTER_CODE} subcollection
-//   nominations/{CODE}
+//                                         — may carry `deleted: true` (admin
+//                                         soft-delete, see setSubmissionDeleted)
+//   nominations/{CODE}                   — may also carry `deleted: true`
 //   minigameEntries/{CODE}
 //   appConfig/csw2026Week                 TEMPORARY — global week start/end
 //                                         dates, see getWeekConfig below
+//   appConfig/admins                      the admin short-login list — see
+//                                         getAdminCodes below. NOT temporary
+//                                         scaffolding like csw2026Week above
+//                                         (real, permanent admin access),
+//                                         just sharing the same single-
+//                                         shared-doc appConfig pattern.
 // ---------------------------------------------------------------------------
 
 const Store = (() => {
@@ -217,6 +225,16 @@ const Store = (() => {
     return FirestoreDB.getDoc(daysCollection, dayId);
   }
 
+  // Every Race Day Trivia submission, from every user, across all 5 days —
+  // the one place this app needs that (js/export.js's Results export, for
+  // the Race Day Trivia tab) rather than one user's days at a time (the
+  // normal case, covered by getTriviaDaysCompleted below). A collectionGroup
+  // read, since each day is its own doc in a per-user subcollection, not one
+  // flat top-level collection — see FirestoreDB.listCollectionGroup.
+  async function getAllTriviaEntries() {
+    return FirestoreDB.listCollectionGroup('days');
+  }
+
   // Every trivia day this user has completed so far — used to show "days
   // completed" alongside the cumulative score.
   async function getTriviaDaysCompleted(code) {
@@ -335,6 +353,104 @@ const Store = (() => {
     if (!ok) throw new Error('Timed out saving the week configuration — appConfig may not be deployed yet in firestore.rules.');
   }
 
+  // ---- Admin role system ---------------------------------------------------
+  // Unlike Developer Mode (js/dev-mode.js — temporary, deleted before the
+  // real event ships), this is the real, permanent way non-MIFN testers get
+  // moderation access: soft-delete/restore Photo Finish + nomination
+  // submissions, and per-user per-activity resets — see js/admin-panel.js.
+  // Stored as one array field on a single shared doc (appConfig/admins),
+  // managed entirely from Developer Mode's new "Manage Admins" section —
+  // granting/revoking access is editing a list, never a code change.
+  // Guarded with the same withTimeoutFallback as getWeekConfig/setWeekConfig
+  // just above, and for the same reason: appConfig/{docId} matches one
+  // shared firestore.rules block, but that rule may not be live yet in the
+  // actual Firebase project.
+  async function getAdminCodes() {
+    const doc = await withTimeoutFallback(FirestoreDB.getDoc('appConfig', 'admins'), 4000, null);
+    return doc?.codes || [];
+  }
+
+  async function addAdminCode(code) {
+    const codes = await getAdminCodes();
+    if (codes.includes(code)) return codes;
+    const next = [...codes, code];
+    await FirestoreDB.setDoc('appConfig', 'admins', { codes: next, updatedAt: FirestoreDB.now() }, true);
+    return next;
+  }
+
+  async function removeAdminCode(code) {
+    const codes = await getAdminCodes();
+    const next = codes.filter((c) => c !== code);
+    await FirestoreDB.setDoc('appConfig', 'admins', { codes: next, updatedAt: FirestoreDB.now() }, true);
+    return next;
+  }
+
+  // ---- Admin Panel: soft delete / restore ----------------------------------
+  // Flags a Photo Finish or nomination entry as hidden rather than actually
+  // deleting it (see getPhotoFinishEntries/getNominations below, which both
+  // filter it out of the Gallery/Recognition Wall by default) — restorable,
+  // never erased. Clearing the matching bingo flag right here (bonus
+  // recomputed the exact same way submitEntry computes it forward) is what
+  // makes "excluded from counts" true the instant this runs, not just
+  // "hidden from this one list." Restoring (`deleted: false`) re-derives
+  // bonus the same way, so a restore correctly re-unlocks it too if this was
+  // the last missing square.
+  async function setSubmissionDeleted(collection, code, bingoKey, deleted) {
+    await FirestoreDB.setDoc(collection, code, { deleted }, true);
+    const user = await FirestoreDB.getDoc('users', code);
+    if (!user) return; // nothing to reconcile if the user doc itself is gone
+    const bingo = { ...emptyBingo(), ...(user.bingo || {}) };
+    bingo[bingoKey] = !deleted;
+    bingo.bonus = BINGO_KEYS.every((k) => bingo[k]);
+    await FirestoreDB.setDoc('users', code, { bingo }, true);
+  }
+
+  // ---- Admin Panel: reset ONE activity for ONE user ------------------------
+  // Distinct from resetUserProgress below (wipes a whole account) and from
+  // setSubmissionDeleted above (only hides a submission, score untouched):
+  // this actually deletes the submission doc(s) for one activity, zeroes out
+  // whatever score it contributed to totalScore, and clears its bingo flag
+  // (bonus recomputed the same way as everywhere else), so a player can
+  // genuinely redo that one activity from scratch. `trivia` resets every one
+  // of the 5 daily rounds at once — there's no "just Tuesday's trivia" reset,
+  // since the Bingo Card's trivia square is a single week-aggregate, not a
+  // per-day one.
+  const ACTIVITY_RESET_CONFIG = {
+    hyperlinkRace: { entryCollection: 'hyperlinkRaceEntries', progressCollections: ['hyperlinkRaceProgress'], bingoKeys: ['hyperlinkRace'] },
+    snapJudgement: { entryCollection: 'snapJudgementEntries', progressCollections: ['snapJudgementProgress'], bingoKeys: ['snapJudgement'] },
+    photoFinish: { entryCollection: 'photoFinishEntries', progressCollections: [], bingoKeys: ['photoFinish'] },
+    nomination: { entryCollection: 'nominations', progressCollections: [], bingoKeys: ['nomination'] },
+    trivia: { entryCollection: null, progressCollections: ['triviaProgress'], bingoKeys: ['trivia', 'triviaMon', 'triviaTue', 'triviaWed', 'triviaThu', 'triviaFri'] },
+  };
+
+  async function resetUserActivity(code, activityKey) {
+    const config = ACTIVITY_RESET_CONFIG[activityKey];
+    if (!config) throw new Error(`Unknown activity "${activityKey}"`);
+
+    const user = (await FirestoreDB.getDoc('users', code)) || {};
+    let scoreDelta = 0;
+    const rest = {};
+
+    if (activityKey === 'trivia') {
+      scoreDelta = -(user.triviaTotalScore || 0);
+      rest.triviaTotalScore = 0;
+      const daysCollection = FirestoreDB.subPath('triviaEntries', code, 'days');
+      await Promise.all(TRIVIA_DAY_IDS.map((dayId) => FirestoreDB.deleteDoc(daysCollection, dayId)));
+    } else {
+      const entry = await FirestoreDB.getDoc(config.entryCollection, code);
+      scoreDelta = -(entry?.score || 0);
+      await FirestoreDB.deleteDoc(config.entryCollection, code);
+    }
+    await Promise.all(config.progressCollections.map((c) => FirestoreDB.deleteDoc(c, code)));
+
+    const bingo = { ...emptyBingo(), ...(user.bingo || {}) };
+    config.bingoKeys.forEach((k) => { bingo[k] = false; });
+    bingo.bonus = BINGO_KEYS.every((k) => bingo[k]);
+    rest.bingo = bingo;
+
+    await FirestoreDB.incrementField('users', code, 'totalScore', scoreDelta, rest);
+  }
+
   async function getLeaderboard(collection, { orderBy, direction = 'desc', limit = 50 }) {
     let rows = await FirestoreDB.listCollection(collection);
     rows.sort((a, b) => {
@@ -350,18 +466,25 @@ const Store = (() => {
     return getLeaderboard('users', { orderBy: 'totalScore', direction: 'desc', limit });
   }
 
-  async function getPhotoFinishEntries() {
+  // `includeDeleted`: the Gallery itself always wants the default (false) —
+  // an admin's soft-delete (see setSubmissionDeleted above) should vanish
+  // from it immediately. Only js/admin-panel.js's own list passes true, so
+  // it can show both its Active and Deleted tabs from one read.
+  async function getPhotoFinishEntries({ includeDeleted = false } = {}) {
     const rows = await FirestoreDB.listCollection('photoFinishEntries');
-    rows.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
-    return rows;
+    const visible = includeDeleted ? rows : rows.filter((r) => !r.deleted);
+    visible.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+    return visible;
   }
 
   // Every "Who Went The Extra Mile?" nomination, newest first — powers the
   // Recognition Wall (only shown to users who've submitted their own).
-  async function getNominations() {
+  // Same `includeDeleted` carve-out as getPhotoFinishEntries above.
+  async function getNominations({ includeDeleted = false } = {}) {
     const rows = await FirestoreDB.listCollection('nominations');
-    rows.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
-    return rows;
+    const visible = includeDeleted ? rows : rows.filter((r) => !r.deleted);
+    visible.sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+    return visible;
   }
 
   // One vote per user, enforced per-entry via the votes/{voterCode} doc.
@@ -506,6 +629,7 @@ const Store = (() => {
     hasSubmittedTriviaDay,
     getTriviaDayEntry,
     getTriviaDaysCompleted,
+    getAllTriviaEntries,
     assignHyperlinkAnswer,
     getHyperlinkAssignment,
     saveHyperlinkSession,
@@ -518,6 +642,11 @@ const Store = (() => {
     clearSnapSession,
     getWeekConfig,
     setWeekConfig,
+    getAdminCodes,
+    addAdminCode,
+    removeAdminCode,
+    setSubmissionDeleted,
+    resetUserActivity,
     getLeaderboard,
     getCombinedLeaderboard,
     getPhotoFinishEntries,

@@ -32,6 +32,18 @@
 //      setCursorGlyph already use for every other per-user preference in
 //      this app) so it survives a reload for MIFN specifically, rather than
 //      resetting to expanded on every login.
+//   5. Manage Admins — NEW this round. Lets MIFN add/remove short logins
+//      from the real admin list (Store.getAdminCodes/addAdminCode/
+//      removeAdminCode, js/store.js) that gates js/admin-panel.js's own
+//      dock button. Unlike everything else in this file, this one IS
+//      permanent infrastructure — js/admin-panel.js itself is not temporary
+//      scaffolding — this section just happens to live inside the MIFN-
+//      only Dev panel because "who can grant admin access" is itself an
+//      MIFN-only decision, same trust level as the week-date config above.
+//   6. Download Results — NEW this round. A client-side .xlsx export
+//      (js/export.js, SheetJS) of every game's submissions + the combined
+//      leaderboard. MIFN-only because it's a full data dump across every
+//      tester, not because the export logic itself is temporary.
 // ===========================================================================
 const DevMode = (() => {
   const DEV_MODE = true;
@@ -126,6 +138,15 @@ const DevMode = (() => {
         <label>End <input type="date" id="devWeekEnd" value="${CSW_WEEK_END_DATE}" /></label>
         <button id="devWeekSave">Save</button>
       </div>
+      <div class="dev-mode-panel__admins">
+        <span class="dev-mode-panel__week-config-label">🛡️ Manage Admins</span>
+        <div id="devAdminsList" class="dev-mode-panel__admins-list">Loading…</div>
+        <div class="dev-mode-panel__admins-add">
+          <input id="devAdminCodeInput" maxlength="4" placeholder="ABCD" />
+          <button id="devAdminAddBtn">Add</button>
+        </div>
+      </div>
+      <button class="dev-mode-panel__export" id="devExportBtn">⬇ Download Results</button>
     `;
 
     panel.querySelector('#devModeMinimizeBtn').addEventListener('click', () => setMinimized(user, true, { showHub }));
@@ -198,6 +219,69 @@ const DevMode = (() => {
         Toast.show('⚠️ Could not save — appConfig may not be deployed yet in firestore.rules.', 'error');
         e.target.disabled = false;
         e.target.textContent = 'Save';
+      }
+    });
+
+    loadAdminsList(panel, { user, showHub });
+
+    panel.querySelector('#devAdminCodeInput').addEventListener('input', (e) => {
+      e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+    });
+    panel.querySelector('#devAdminAddBtn').addEventListener('click', async () => {
+      const input = panel.querySelector('#devAdminCodeInput');
+      const code = input.value.trim();
+      if (!/^[A-Z]{4}$/.test(code)) { Toast.show('Enter a valid 4-letter short login.', 'error'); return; }
+      await Store.addAdminCode(code);
+      AdminPanel.invalidateCache();
+      input.value = '';
+      await loadAdminsList(panel, { user, showHub });
+      Toast.show(`🛡️ ${code} is now an admin.`, 'success');
+      // If MIFN just granted itself (or re-granted after a prior removal),
+      // its own Admin Panel dock button should appear immediately, not only
+      // after the next unrelated showHub() — AdminPanel.render needs a
+      // fresh showHub() call to actually re-check and re-render it.
+      if (code === user.code) showHub();
+    });
+
+    // Destructive-ish (revokes access, not data), so confirm()-gated like
+    // every other remove/reset control in this panel.
+    async function loadAdminsList(panel, { user, showHub }) {
+      const listEl = panel.querySelector('#devAdminsList');
+      if (!listEl) return;
+      try {
+        const codes = await Store.getAdminCodes();
+        listEl.innerHTML = codes.length
+          ? codes.map((c) => `<span class="dev-mode-panel__admin-chip">${c}<button data-code="${c}" title="Remove admin access">✕</button></span>`).join('')
+          : '<span style="opacity:0.7;">No admins yet.</span>';
+        listEl.querySelectorAll('button[data-code]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const code = btn.dataset.code;
+            if (!confirm(`Remove admin access for "${code}"?`)) return;
+            await Store.removeAdminCode(code);
+            AdminPanel.invalidateCache();
+            await loadAdminsList(panel, { user, showHub });
+            Toast.show(`Removed admin access for ${code}.`, 'success');
+            if (code === user.code) showHub(); // MIFN removing its own access hides its dock button right away
+          });
+        });
+      } catch (e) {
+        listEl.textContent = 'Could not load admin list.';
+        console.warn('Could not load admin list', e);
+      }
+    }
+
+    panel.querySelector('#devExportBtn').addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      e.target.textContent = 'Generating…';
+      try {
+        await ResultsExport.download();
+        Toast.show('⬇️ Results exported!', 'success');
+      } catch (err) {
+        console.error(err);
+        Toast.show('⚠️ Export failed — see console for details.', 'error');
+      } finally {
+        e.target.disabled = false;
+        e.target.textContent = '⬇ Download Results';
       }
     });
   }

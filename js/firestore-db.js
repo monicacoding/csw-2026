@@ -19,7 +19,7 @@
 import { db } from './firebase-config.js';
 import {
   doc, getDoc as fsGetDoc, setDoc as fsSetDoc, deleteDoc as fsDeleteDoc,
-  getDocs, collection as fsCollection, increment,
+  getDocs, collection as fsCollection, collectionGroup as fsCollectionGroup, increment,
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
 
 const FirestoreDB = (() => {
@@ -67,6 +67,22 @@ const FirestoreDB = (() => {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   }
 
+  // Firestore's collectionGroup query — every subcollection named `subName`
+  // across every parent doc, in one read (e.g. every user's
+  // triviaEntries/{code}/days/{dayId} doc, not just one user's). Used only
+  // by js/export.js's Results export (Store.getAllTriviaEntries), since
+  // that's the one place this app needs "every user's trivia days" rather
+  // than one user's at a time (Store.getTriviaDaysCompleted already covers
+  // the single-user case, via the plain subPath + listCollection above).
+  // Needs its own Firestore index the first time it actually runs against
+  // real data with enough docs to require one — if the Download Results
+  // button's trivia tab ever throws a "query requires an index" error, the
+  // console error includes a direct link to create it in Firebase Console.
+  async function listCollectionGroup(subName) {
+    const snap = await getDocs(fsCollectionGroup(db, subName));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  }
+
   // Subcollections are addressed as "parentCollection/parentId/subName" —
   // Firestore's own doc()/collection() parse a slash-delimited path string
   // directly (a 3-segment string here + one more `id` segment passed to
@@ -76,7 +92,7 @@ const FirestoreDB = (() => {
     return `${collectionPath}/${id}/${sub}`;
   }
 
-  return { getDoc, setDoc, deleteDoc, incrementField, listCollection, subPath, now };
+  return { getDoc, setDoc, deleteDoc, incrementField, listCollection, listCollectionGroup, subPath, now };
 })();
 
 window.FirestoreDB = FirestoreDB;
