@@ -418,6 +418,16 @@ const Store = (() => {
     await FirestoreDB.setDoc('users', code, { onboardingDismissed: dismissed }, true);
   }
 
+  // TEMPORARY — see js/dev-mode.js's header comment. The Developer Mode
+  // panel's own collapsed/expanded state, written the moment it's toggled —
+  // same pattern as setOnboardingDismissed just above (a plain field on the
+  // user doc, not a separate collection), so it's remembered across reloads
+  // for MIFN specifically rather than resetting to expanded on every login.
+  // Delete this alongside the rest of Developer Mode.
+  async function setDevModeMinimized(code, minimized) {
+    await FirestoreDB.setDoc('users', code, { devModeMinimized: minimized }, true);
+  }
+
   // ---- Dev-only: reset one user's own test data ---------------------------
   // Reachable only from the Developer Mode panel's Reset button (behind
   // js/app.js's DEV_MODE flag — see that file). Deliberately scoped to a
@@ -518,6 +528,7 @@ const Store = (() => {
     markFinishLineSeen,
     setCursorGlyph,
     setOnboardingDismissed,
+    setDevModeMinimized,
     resetUserProgress,
     emptyBingo,
   };
