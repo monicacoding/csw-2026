@@ -25,6 +25,13 @@
 //      fixed for good, delete this control, applyWeekDates, and the
 //      appConfig collection entirely — CSW_SCHEDULE's own hardcoded
 //      `date` fields become the permanent truth again at that point.
+//   4. Minimize/expand — purely cosmetic, so the panel can be tucked out of
+//      the way while poking around the hub without deleting it outright.
+//      Persisted per-user (Store.setDevModeMinimized — a plain field on the
+//      `users/{code}` doc, the exact same pattern setOnboardingDismissed/
+//      setCursorGlyph already use for every other per-user preference in
+//      this app) so it survives a reload for MIFN specifically, rather than
+//      resetting to expanded on every login.
 // ===========================================================================
 const DevMode = (() => {
   const DEV_MODE = true;
@@ -48,13 +55,28 @@ const DevMode = (() => {
     return panel;
   }
 
+  // Flips the minimized/expanded state: updates `user`'s own in-memory
+  // field directly (this is the exact same object reference js/app.js's
+  // `currentUser` points at, so later calls — including the very next
+  // showHub() this triggers — see the change immediately, with no refetch
+  // needed) and persists it in the background. Fire-and-forget, same as
+  // every other per-user preference write in this app (setCursorGlyph,
+  // setOnboardingDismissed) — nothing here needs to block on the write
+  // actually landing before the panel itself updates.
+  function setMinimized(user, minimized, { showHub }) {
+    user.devModeMinimized = minimized;
+    Store.setDevModeMinimized(user.code, minimized)
+      .catch((e) => console.warn('Could not persist Developer Mode panel collapse state', e));
+    showHub();
+  }
+
   // `user`: the logged-in user, checked against both the DEV_MODE flag and
   // isDevUser above. `callbacks.showHub`/`callbacks.refreshUser`: js/app.js's
   // own functions, passed in rather than reached for directly, so this
   // module never needs access to App's private closure state — call sites
   // that change what the hub should show (a day jump, a week-date save, a
-  // reset) call back into app.js through these instead of re-implementing
-  // any of that here.
+  // reset, minimizing/expanding) call back into app.js through these
+  // instead of re-implementing any of that here.
   function render(user, { showHub, refreshUser }) {
     if (!DEV_MODE || !isDevUser(user)) {
       document.getElementById('devModePanel')?.remove();
@@ -62,6 +84,24 @@ const DevMode = (() => {
     }
 
     const panel = ensurePanel();
+    panel.classList.toggle('dev-mode-panel--minimized', !!user.devModeMinimized);
+
+    // Collapsed: just a small pill (label + an expand chevron) — the day-
+    // jump buttons, Reset, and the week-date config are all absent from the
+    // DOM entirely while minimized, not merely hidden, so there's nothing
+    // to accidentally interact with (or that a screen reader would
+    // announce) while the panel is tucked away. Clicking anywhere on the
+    // pill re-expands.
+    if (user.devModeMinimized) {
+      panel.innerHTML = `
+        <button class="dev-mode-panel__pill" id="devModeExpandBtn" title="Expand Developer Mode">
+          🛠️ Dev Mode <span class="dev-mode-panel__chevron">▸</span>
+        </button>
+      `;
+      panel.querySelector('#devModeExpandBtn').addEventListener('click', () => setMinimized(user, false, { showHub }));
+      return;
+    }
+
     const currentOverride = localStorage.getItem('csw2026_preview_date') || '';
     const dayBtns = CSW_SCHEDULE.map((d) =>
       `<button data-date="${d.date}" class="${d.date === currentOverride ? 'is-active' : ''}">${d.label.slice(0, 3)}</button>`
@@ -72,7 +112,10 @@ const DevMode = (() => {
     // individual unlock reachable.
     const postWeekDate = addDaysToDateString(CSW_WEEK_END_DATE, 1);
     panel.innerHTML = `
-      <span class="dev-mode-panel__label">🛠️ Developer Mode</span>
+      <div class="dev-mode-panel__header">
+        <span class="dev-mode-panel__label">🛠️ Developer Mode</span>
+        <button class="dev-mode-panel__minimize" id="devModeMinimizeBtn" title="Minimize Developer Mode">–</button>
+      </div>
       ${dayBtns}
       <button data-date="${postWeekDate}" class="${postWeekDate === currentOverride ? 'is-active' : ''}">Post-Week</button>
       <button data-date="">Real</button>
@@ -84,6 +127,8 @@ const DevMode = (() => {
         <button id="devWeekSave">Save</button>
       </div>
     `;
+
+    panel.querySelector('#devModeMinimizeBtn').addEventListener('click', () => setMinimized(user, true, { showHub }));
 
     // Day-jump preview buttons — simulate "today" for MIFN's own browser
     // only (localStorage, per-device). Unrelated to the real week-date
