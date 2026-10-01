@@ -1007,7 +1007,7 @@ const Games = (() => {
     body.innerHTML = modalHeader(day, 'Photo Finish') + `
       <div class="game-explainer">
         <p>🎯 <span><strong>Goal:</strong> a lighthearted caption contest — pick the template that best captures a funny or relatable customer-service moment.</span></p>
-        <p>🖼️ <span>Choose <strong>one template</strong> from the grid below, then add your own <strong>caption</strong> to go with it.</span></p>
+        <p>🖼️ <span>Choose <strong>one template</strong> from the options available, then add your own <strong>caption</strong> to go with it.</span></p>
         <p>🗳️ <span>Once it's in, see how the rest of the team votes for their favorites down in the Gallery.</span></p>
         <p>☝️ <span>It's <strong>one submission per person</strong> — make it count!</span></p>
       </div>
