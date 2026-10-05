@@ -34,21 +34,15 @@ a { color: inherit; text-decoration: none; cursor: none; }
   line-height: 1;
   filter: drop-shadow(1px 2px 1px rgba(29,53,87,0.35));
 }
-/* Fixed pool of particles, created once by js/cursor.js and replayed with the
-   Web Animations API (position/opacity/scale are all set in that script's
-   keyframes, scaled to cursor speed at spawn time) — so there's deliberately
-   no CSS animation or will-change here any more: a will-change per spark used
-   to give every short-lived particle its own compositor layer. Idle particles
-   sit at opacity 0. */
+/* The trail is drawn on a single full-viewport canvas by js/cursor.js — no
+   per-spark elements, animations or compositor layers (those were the cost).
+   It only ever paints a few small sparks; the canvas itself is transparent and
+   non-interactive. */
 #cursorTrail {
   position: fixed; top: 0; left: 0;
+  width: 100vw; height: 100vh;
   pointer-events: none;
   z-index: 9998;
-}
-.cursor-particle {
-  position: absolute; top: 0; left: 0;
-  border-radius: 50%;
-  opacity: 0;
 }
 
 /* "None" in the cursor picker (js/cursor.js stops the custom cursor and adds
