@@ -533,13 +533,6 @@ const Store = (() => {
     await FirestoreDB.setDoc('users', code, { cursorGlyph: glyph }, true);
   }
 
-  // The "Reduce animations" switch in the cursor picker (js/display-prefs.js).
-  // Absent on a user doc = "never chosen," which follows the OS-level
-  // prefers-reduced-motion setting rather than defaulting to either value.
-  async function setReduceMotion(code, on) {
-    await FirestoreDB.setDoc('users', code, { reduceMotion: on }, true);
-  }
-
   // The onboarding modal's "Don't show this again" checkbox (see
   // App.renderOnboardingContent) — written the moment the checkbox is
   // toggled, not deferred until the modal is actually dismissed, so
@@ -665,7 +658,6 @@ const Store = (() => {
     markEasterEggFound,
     markFinishLineSeen,
     setCursorGlyph,
-    setReduceMotion,
     setOnboardingDismissed,
     setDevModeMinimized,
     resetUserProgress,

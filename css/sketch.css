@@ -252,31 +252,6 @@ html.system-cursor textarea { cursor: text !important; }
 }
 .cursor-picker-option--none span { font-weight: 600; color: var(--ink-soft); font-size: 11px; }
 
-/* "Reduce animations" switch, under the cursor grid */
-.motion-toggle {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  width: 100%; margin-top: 4px; padding: 10px 2px 0;
-  background: none; border: none; border-top: 1.5px dashed var(--sage-dark);
-  text-align: left; color: var(--navy);
-  font-size: 13px; font-weight: 800;
-}
-.motion-toggle__text { display: flex; flex-direction: column; gap: 2px; }
-.motion-toggle__text small { font-weight: 600; font-size: 11px; line-height: 1.3; color: var(--ink-soft); max-width: 170px; }
-.motion-toggle__track {
-  position: relative; flex-shrink: 0;
-  width: 42px; height: 24px; border-radius: 999px;
-  background: var(--sage-dark); border: 2px solid var(--navy);
-  transition: background 0.15s ease;
-}
-.motion-toggle__thumb {
-  position: absolute; top: 1px; left: 1px;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: var(--white); border: 2px solid var(--navy);
-  transition: transform 0.15s ease;
-}
-.motion-toggle.is-on .motion-toggle__track { background: var(--gold); }
-.motion-toggle.is-on .motion-toggle__thumb { transform: translateX(18px); }
-
 /* Developer Mode panel — day-jump + Reset + real week-date config, tucked
    under the badge. Dev-only: gated behind js/dev-mode.js's DEV_MODE flag
    AND (as of this round) an MIFN-only check, must not ship in the real-
@@ -1543,66 +1518,3 @@ html.system-cursor textarea { cursor: text !important; }
   .finish-card img { width: 150px; }
   .finish-card h1 { font-size: 28px; }
 }
-
-/* ===========================================================================
-   Reduce animations (js/display-prefs.js puts `reduce-motion` on <html>; the
-   switch lives in the cursor picker, js/cursor-picker.js). Goal is less
-   motion for performance/comfort, NOT an unresponsive app: every control
-   still visibly reacts (colour, shadow, brightness), state changes are still
-   obvious — only travel, wiggles, idle loops and fades go away. Kept last in
-   this file so it wins the cascade against every rule above.
-=========================================================================== */
-/* One blanket reset covers the whole list: entrance/transition animations
-   (modalPop, fadeIn), every idle loop (mascot bob + blink, active day
-   marker pulse, hint ring spin, ambient decorations) and all hover/press
-   transitions. 0.001ms rather than `none` so `animationend`/`transitionend`
-   still fire for anything listening. */
-html.reduce-motion *,
-html.reduce-motion *::before,
-html.reduce-motion *::after {
-  animation-duration: 0.001ms !important;
-  animation-delay: 0s !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.001ms !important;
-  transition-delay: 0s !important;
-  scroll-behavior: auto !important;
-}
-
-/* Ambient background: the grid stays; clouds exist only to drift, so they go;
-   the rest sit still, and the mouse parallax (also gated in js/ambient.js)
-   is cancelled. */
-html.reduce-motion .ambient-cloud { display: none; }
-html.reduce-motion #bgLayer { transform: none !important; }
-
-/* Hover/press: swap travel (lift, rotate, scale) for a non-moving cue that
-   still reads as "this reacted" — the same drop-shadow growth/shrink the
-   originals already used, plus a brightness nudge. */
-html.reduce-motion .doodle-btn:hover:not(:disabled) {
-  transform: none;
-  filter: drop-shadow(3px 4px 0 rgba(29,53,87,0.22)) brightness(1.08);
-}
-html.reduce-motion .doodle-btn:active:not(:disabled) {
-  transform: none;
-  filter: drop-shadow(1px 2px 0 rgba(29,53,87,0.22)) brightness(0.9);
-}
-html.reduce-motion .sketch-card.interactive:hover {
-  transform: none;
-  filter: drop-shadow(6px 10px 0 rgba(29, 53, 87, 0.2));
-}
-html.reduce-motion .sketch-card.interactive:active {
-  transform: none;
-  filter: drop-shadow(2px 3px 0 rgba(29, 53, 87, 0.2)) brightness(0.94);
-}
-html.reduce-motion .player-badge__avatar:hover,
-html.reduce-motion .player-badge__help:hover,
-html.reduce-motion .player-badge__exit:hover,
-html.reduce-motion .modal-close:hover,
-html.reduce-motion .cursor-picker-option:hover,
-html.reduce-motion .emoji-option:hover:not(.selected),
-html.reduce-motion .pf-template-option:hover:not(.selected) {
-  transform: none;
-  filter: brightness(1.1);
-}
-/* The Bingo bonus cell's pulsing glow is an idle loop (stopped above) — leave
-   it a steady glow rather than losing the "this is special" cue. */
-html.reduce-motion .secret-glow { filter: drop-shadow(0 0 8px var(--gold)); }

@@ -528,12 +528,11 @@ const App = (() => {
   // handlers — re-fetching the user doc here would be a genuine network
   // round-trip blocking the *entire* hub render (badge, track, activity
   // board, all of it) for what is only display preferences.
-  // DisplayPrefs.applyUser applies the cursor glyph / reduce-animations
-  // choices from `currentUser` the first time it sees a given login and then
-  // leaves them alone: this runs on every re-render, often with a
-  // `currentUser` older than a just-made change in the cursor picker (which
-  // updates DisplayPrefs directly), so re-applying the doc every time would
-  // flip fresh choices back.
+  // DisplayPrefs.applyUser applies the cursor glyph from `currentUser` the
+  // first time it sees a given login and then leaves it alone: this runs on
+  // every re-render, often with a `currentUser` older than a just-made
+  // change in the cursor picker (which updates DisplayPrefs directly), so
+  // re-applying the doc every time would flip a fresh choice back.
   function showHub() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appRoot').style.display = 'block';
@@ -565,7 +564,7 @@ const App = (() => {
     // to change your cursor" affordance, not a reflection of the current
     // choice (that's what the picker's own highlighted option is for).
     badge.innerHTML = `
-      <button class="player-badge__avatar" id="avatarBtn" title="${currentUser.code} — cursor &amp; animation settings">${Icons.cursor}</button>
+      <button class="player-badge__avatar" id="avatarBtn" title="${currentUser.code} — click to change your cursor">${Icons.cursor}</button>
       <button class="player-badge__help" id="helpBtn" title="Help">?</button>
       <button class="player-badge__exit" id="exitBtn" title="Log out">✕</button>
     `;

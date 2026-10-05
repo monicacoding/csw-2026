@@ -18,8 +18,7 @@
 //  - Glyph 'none' (Cursor.NONE) tears all of it down — the dot, the
 //    listeners, the particle pool — and hands the pointer back to the
 //    browser (html.system-cursor, see css/sketch.css), rather than just
-//    hiding it. The trail alone can also be switched off while keeping the
-//    glyph (Cursor.setTrail) — that's what "Reduce animations" uses.
+//    hiding it.
 // ---------------------------------------------------------------------------
 
 const Cursor = (() => {
@@ -29,7 +28,6 @@ const Cursor = (() => {
   const POOL_SIZE = 64;
 
   let dot = null, trail = null, pool = [], poolIdx = 0;
-  let trailEnabled = true;
   let rafId = 0, pendingX = 0, pendingY = 0;
   let lastX = null, lastY = null, lastMoveTime = 0, smoothedSpeed = 0, lastSpawn = 0;
 
@@ -99,11 +97,6 @@ const Cursor = (() => {
     else start(g);
   }
 
-  function setTrail(enabled) {
-    trailEnabled = enabled;
-    if (!enabled) { lastX = null; smoothedSpeed = 0; }
-  }
-
   function flush() {
     rafId = 0;
     if (dot) dot.style.transform = `translate(${pendingX}px, ${pendingY}px) translate(-50%,-50%)`;
@@ -112,8 +105,6 @@ const Cursor = (() => {
   function onMove(e) {
     pendingX = e.clientX; pendingY = e.clientY;
     if (!rafId) rafId = requestAnimationFrame(flush);
-    if (!trailEnabled) return;
-
     const now = performance.now();
 
     // Instantaneous speed since the last move event. A stale/first sample
@@ -161,7 +152,7 @@ const Cursor = (() => {
     ], { duration: 600, easing: 'ease-out' });
   }
 
-  return { NONE, init, setGlyph, setTrail };
+  return { NONE, init, setGlyph };
 })();
 
 window.Cursor = Cursor;

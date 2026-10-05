@@ -1,15 +1,12 @@
 // ---------------------------------------------------------------------------
 // The cursor picker: a small popover (opened by clicking the player badge's
 // avatar, which always shows a plain cursor icon — a constant affordance,
-// not a reflection of the current choice) holding the display settings that
-// exist for performance as much as style:
-//  - the cursor itself — "Default cursor" first (the fix for a laggy
-//    machine: turns the custom cursor and its trail off entirely), then the
-//    emoji glyphs
-//  - a "Reduce animations" switch (see js/display-prefs.js and the
-//    html.reduce-motion block at the end of css/sketch.css)
-// Both apply instantly and persist on the user's record via DisplayPrefs —
-// this module only draws the UI and forwards clicks.
+// not a reflection of the current choice) that lets the player swap the
+// custom cursor glyph — or turn the custom cursor off. "Default cursor" leads
+// the options because it's the fix for a laggy machine (it removes the custom
+// cursor and its trail entirely), not just a style preference. Applies
+// instantly and persists on the user's record via DisplayPrefs — this module
+// only draws the UI and forwards clicks.
 // ---------------------------------------------------------------------------
 
 const CursorPicker = (() => {
@@ -24,20 +21,8 @@ const CursorPicker = (() => {
     panel.innerHTML = `
       <div class="cursor-picker-panel__title">Pick Your Cursor</div>
       <div class="cursor-picker-panel__grid" id="cpGrid"></div>
-      <button type="button" class="motion-toggle" id="cpMotionToggle" role="switch" aria-checked="false">
-        <span class="motion-toggle__text">
-          Reduce animations
-          <small>Trail, wiggles &amp; background motion off — helps if the site feels laggy</small>
-        </span>
-        <span class="motion-toggle__track"><span class="motion-toggle__thumb"></span></span>
-      </button>
     `;
     document.body.appendChild(panel);
-
-    panel.querySelector('#cpMotionToggle').addEventListener('click', () => {
-      DisplayPrefs.setReduceMotion(!DisplayPrefs.getReduceMotion());
-      renderMotionToggle();
-    });
 
     document.addEventListener('click', (e) => {
       if (panel.style.display !== 'flex') return;
@@ -53,7 +38,7 @@ const CursorPicker = (() => {
     const grid = panel.querySelector('#cpGrid');
     // "Default cursor" leads, full-width, ahead of the emoji choices: it's
     // the answer to a performance complaint, so it should be the first thing
-    // someone struggling with lag sees, not a sixth-of-six afterthought.
+    // someone struggling with lag sees, not a seventh-of-seven afterthought.
     grid.innerHTML = `
       <button class="cursor-picker-option cursor-picker-option--none ${current === Cursor.NONE ? 'is-selected' : ''}" data-glyph="${Cursor.NONE}" title="Use your normal system cursor — no custom cursor, no trail (smoothest)">
         Default cursor <span>(fastest)</span>
@@ -70,13 +55,6 @@ const CursorPicker = (() => {
     });
   }
 
-  function renderMotionToggle() {
-    const on = DisplayPrefs.getReduceMotion();
-    const toggle = panel.querySelector('#cpMotionToggle');
-    toggle.setAttribute('aria-checked', on ? 'true' : 'false');
-    toggle.classList.toggle('is-on', on);
-  }
-
   function position() {
     const avatarBtn = document.getElementById('avatarBtn');
     if (!avatarBtn) return;
@@ -89,7 +67,6 @@ const CursorPicker = (() => {
   function open() {
     ensurePanel();
     renderOptions(DisplayPrefs.getGlyph());
-    renderMotionToggle();
     position();
     panel.style.display = 'flex';
   }
