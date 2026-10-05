@@ -527,8 +527,17 @@ const Store = (() => {
     await FirestoreDB.setDoc('users', code, { finishLineSeenAt: FirestoreDB.now() }, true);
   }
 
+  // `glyph` is an emoji, or 'none' (Cursor.NONE) for the browser's normal
+  // system cursor — see js/cursor.js / js/display-prefs.js.
   async function setCursorGlyph(code, glyph) {
     await FirestoreDB.setDoc('users', code, { cursorGlyph: glyph }, true);
+  }
+
+  // The "Reduce animations" switch in the cursor picker (js/display-prefs.js).
+  // Absent on a user doc = "never chosen," which follows the OS-level
+  // prefers-reduced-motion setting rather than defaulting to either value.
+  async function setReduceMotion(code, on) {
+    await FirestoreDB.setDoc('users', code, { reduceMotion: on }, true);
   }
 
   // The onboarding modal's "Don't show this again" checkbox (see
@@ -656,6 +665,7 @@ const Store = (() => {
     markEasterEggFound,
     markFinishLineSeen,
     setCursorGlyph,
+    setReduceMotion,
     setOnboardingDismissed,
     setDevModeMinimized,
     resetUserProgress,

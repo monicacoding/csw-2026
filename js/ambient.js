@@ -19,14 +19,17 @@ const Ambient = (() => {
     // gentle parallax
     let raf = null;
     window.addEventListener('mousemove', (e) => {
-      if (raf) return;
+      // "Reduce animations" (js/display-prefs.js) — the parallax is pure
+      // decoration, and shifting the whole animated layer on every mouse move
+      // is one of the more expensive things this file does.
+      if (raf || document.documentElement.classList.contains('reduce-motion')) return;
       raf = requestAnimationFrame(() => {
         const px = (e.clientX / window.innerWidth - 0.5) * 16;
         const py = (e.clientY / window.innerHeight - 0.5) * 16;
         layer.style.transform = `translate(${px}px, ${py}px)`;
         raf = null;
       });
-    });
+    }, { passive: true });
   }
 
   function rand(min, max) { return Math.random() * (max - min) + min; }

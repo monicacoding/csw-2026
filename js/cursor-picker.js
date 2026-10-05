@@ -1,10 +1,15 @@
 // ---------------------------------------------------------------------------
 // The cursor picker: a small popover (opened by clicking the player badge's
 // avatar, which always shows a plain cursor icon — a constant affordance,
-// not a reflection of the current choice) that lets the player swap the
-// custom cursor glyph. Applies instantly via Cursor.setGlyph and persists on
-// the user's record (Store.setCursorGlyph) so it sticks for the session,
-// same as everything else pending the real Firestore swap.
+// not a reflection of the current choice) holding the display settings that
+// exist for performance as much as style:
+//  - the cursor itself — "Default cursor" first (the fix for a laggy
+//    machine: turns the custom cursor and its trail off entirely), then the
+//    emoji glyphs
+//  - a "Reduce animations" switch (see js/display-prefs.js and the
+//    html.reduce-motion block at the end of css/sketch.css)
+// Both apply instantly and persist on the user's record via DisplayPrefs —
+// this module only draws the UI and forwards clicks.
 // ---------------------------------------------------------------------------
 
 const CursorPicker = (() => {
@@ -19,8 +24,20 @@ const CursorPicker = (() => {
     panel.innerHTML = `
       <div class="cursor-picker-panel__title">Pick Your Cursor</div>
       <div class="cursor-picker-panel__grid" id="cpGrid"></div>
+      <button type="button" class="motion-toggle" id="cpMotionToggle" role="switch" aria-checked="false">
+        <span class="motion-toggle__text">
+          Reduce animations
+          <small>Trail, wiggles &amp; background motion off — helps if the site feels laggy</small>
+        </span>
+        <span class="motion-toggle__track"><span class="motion-toggle__thumb"></span></span>
+      </button>
     `;
     document.body.appendChild(panel);
+
+    panel.querySelector('#cpMotionToggle').addEventListener('click', () => {
+      DisplayPrefs.setReduceMotion(!DisplayPrefs.getReduceMotion());
+      renderMotionToggle();
+    });
 
     document.addEventListener('click', (e) => {
       if (panel.style.display !== 'flex') return;
@@ -34,21 +51,30 @@ const CursorPicker = (() => {
 
   function renderOptions(current) {
     const grid = panel.querySelector('#cpGrid');
-    grid.innerHTML = OPTIONS.map((glyph) =>
-      `<button class="cursor-picker-option ${glyph === current ? 'is-selected' : ''}" data-glyph="${glyph}">${glyph}</button>`
-    ).join('');
+    // "Default cursor" leads, full-width, ahead of the emoji choices: it's
+    // the answer to a performance complaint, so it should be the first thing
+    // someone struggling with lag sees, not a sixth-of-six afterthought.
+    grid.innerHTML = `
+      <button class="cursor-picker-option cursor-picker-option--none ${current === Cursor.NONE ? 'is-selected' : ''}" data-glyph="${Cursor.NONE}" title="Use your normal system cursor — no custom cursor, no trail (smoothest)">
+        Default cursor <span>(fastest)</span>
+      </button>
+      ${OPTIONS.map((glyph) =>
+        `<button class="cursor-picker-option ${glyph === current ? 'is-selected' : ''}" data-glyph="${glyph}">${glyph}</button>`
+      ).join('')}
+    `;
     grid.querySelectorAll('.cursor-picker-option').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const glyph = btn.dataset.glyph;
-        Cursor.setGlyph(glyph);
+      btn.addEventListener('click', () => {
+        DisplayPrefs.setGlyph(btn.dataset.glyph);
         grid.querySelectorAll('.cursor-picker-option').forEach((b) => b.classList.toggle('is-selected', b === btn));
-
-        const code = Auth.getCurrentCode();
-        if (code) {
-          try { await Store.setCursorGlyph(code, glyph); } catch (e) { console.warn('Could not save cursor choice', e); }
-        }
       });
     });
+  }
+
+  function renderMotionToggle() {
+    const on = DisplayPrefs.getReduceMotion();
+    const toggle = panel.querySelector('#cpMotionToggle');
+    toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+    toggle.classList.toggle('is-on', on);
   }
 
   function position() {
@@ -60,9 +86,10 @@ const CursorPicker = (() => {
     panel.style.right = '28px';
   }
 
-  function open(currentGlyph) {
+  function open() {
     ensurePanel();
-    renderOptions(currentGlyph);
+    renderOptions(DisplayPrefs.getGlyph());
+    renderMotionToggle();
     position();
     panel.style.display = 'flex';
   }
@@ -71,12 +98,10 @@ const CursorPicker = (() => {
     if (panel) panel.style.display = 'none';
   }
 
-  async function toggle() {
+  function toggle() {
     ensurePanel();
     if (panel.style.display === 'flex') { close(); return; }
-    const code = Auth.getCurrentCode();
-    const user = code ? await FirestoreDB.getDoc('users', code) : null;
-    open(user?.cursorGlyph || '🏎️');
+    open();
   }
 
   return { toggle, open, close };
