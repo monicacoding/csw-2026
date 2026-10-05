@@ -527,6 +527,8 @@ const Store = (() => {
     await FirestoreDB.setDoc('users', code, { finishLineSeenAt: FirestoreDB.now() }, true);
   }
 
+  // `glyph` is an emoji, or 'none' (Cursor.NONE) for the browser's normal
+  // system cursor — see js/cursor.js / js/display-prefs.js.
   async function setCursorGlyph(code, glyph) {
     await FirestoreDB.setDoc('users', code, { cursorGlyph: glyph }, true);
   }

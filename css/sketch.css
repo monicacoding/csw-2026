@@ -34,21 +34,45 @@ a { color: inherit; text-decoration: none; cursor: none; }
   line-height: 1;
   filter: drop-shadow(1px 2px 1px rgba(29,53,87,0.35));
 }
-.cursor-particle {
+/* Fixed pool of particles, created once by js/cursor.js and replayed with the
+   Web Animations API (position/opacity/scale are all set in that script's
+   keyframes, scaled to cursor speed at spawn time) — so there's deliberately
+   no CSS animation or will-change here any more: a will-change per spark used
+   to give every short-lived particle its own compositor layer. Idle particles
+   sit at opacity 0. */
+#cursorTrail {
   position: fixed; top: 0; left: 0;
   pointer-events: none;
   z-index: 9998;
+}
+.cursor-particle {
+  position: absolute; top: 0; left: 0;
   border-radius: 50%;
-  will-change: transform, opacity;
-  animation: particleFade 0.6s ease-out forwards;
+  opacity: 0;
 }
-@keyframes particleFade {
-  /* --p-opacity is set per-particle by js/cursor.js, scaled to cursor speed
-     at spawn time — faster movement spawns denser, more opaque particles;
-     slower movement spawns fainter, sparser ones. Color/shape are untouched. */
-  0% { opacity: var(--p-opacity, 0.9); transform: translate(-50%, -50%) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -50%) translateY(-14px) scale(0.2); }
-}
+
+/* "None" in the cursor picker (js/cursor.js stops the custom cursor and adds
+   this class to <html>): hand the pointer back to the browser. Everything in
+   this file that says `cursor: none` (and js/mascot.js's inline one) is
+   overridden here with !important rather than edited one by one, so a future
+   `cursor: none` added anywhere else is covered automatically. Clickables get
+   the pointer hand, text fields the I-beam, everything else the arrow. */
+html.system-cursor,
+html.system-cursor * { cursor: auto !important; }
+html.system-cursor button,
+html.system-cursor a,
+html.system-cursor select,
+html.system-cursor label,
+html.system-cursor [role="button"],
+html.system-cursor .activity-card,
+html.system-cursor .bingo-cell,
+html.system-cursor .emoji-option,
+html.system-cursor .pf-template-option,
+html.system-cursor .eggable { cursor: pointer !important; }
+html.system-cursor button:disabled,
+html.system-cursor .cta-disabled { cursor: not-allowed !important; }
+html.system-cursor input:not([type="checkbox"]):not([type="radio"]):not([type="date"]),
+html.system-cursor textarea { cursor: text !important; }
 
 /* ===========================================================================
    Ambient background layer (js/ambient.js)
@@ -219,6 +243,14 @@ a { color: inherit; text-decoration: none; cursor: none; }
 }
 .cursor-picker-option:hover { transform: scale(1.08); border-color: var(--gold); }
 .cursor-picker-option.is-selected { background: var(--gold); border-color: var(--gold-dark); }
+/* "Default cursor" — the performance escape hatch, so it leads the grid and
+   spans every column instead of sitting in a cell like the emoji do. */
+.cursor-picker-option--none {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 13px; font-weight: 800; color: var(--navy); padding: 10px 8px;
+}
+.cursor-picker-option--none span { font-weight: 600; color: var(--ink-soft); font-size: 11px; }
 
 /* Developer Mode panel — day-jump + Reset + real week-date config, tucked
    under the badge. Dev-only: gated behind js/dev-mode.js's DEV_MODE flag

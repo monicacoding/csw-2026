@@ -2,9 +2,11 @@
 // The cursor picker: a small popover (opened by clicking the player badge's
 // avatar, which always shows a plain cursor icon — a constant affordance,
 // not a reflection of the current choice) that lets the player swap the
-// custom cursor glyph. Applies instantly via Cursor.setGlyph and persists on
-// the user's record (Store.setCursorGlyph) so it sticks for the session,
-// same as everything else pending the real Firestore swap.
+// custom cursor glyph — or turn the custom cursor off. "Default cursor" leads
+// the options because it's the fix for a laggy machine (it removes the custom
+// cursor and its trail entirely), not just a style preference. Applies
+// instantly and persists on the user's record via DisplayPrefs — this module
+// only draws the UI and forwards clicks.
 // ---------------------------------------------------------------------------
 
 const CursorPicker = (() => {
@@ -34,19 +36,21 @@ const CursorPicker = (() => {
 
   function renderOptions(current) {
     const grid = panel.querySelector('#cpGrid');
-    grid.innerHTML = OPTIONS.map((glyph) =>
-      `<button class="cursor-picker-option ${glyph === current ? 'is-selected' : ''}" data-glyph="${glyph}">${glyph}</button>`
-    ).join('');
+    // "Default cursor" leads, full-width, ahead of the emoji choices: it's
+    // the answer to a performance complaint, so it should be the first thing
+    // someone struggling with lag sees, not a seventh-of-seven afterthought.
+    grid.innerHTML = `
+      <button class="cursor-picker-option cursor-picker-option--none ${current === Cursor.NONE ? 'is-selected' : ''}" data-glyph="${Cursor.NONE}" title="Use your normal system cursor — no custom cursor, no trail (smoothest)">
+        Default cursor <span>(fastest)</span>
+      </button>
+      ${OPTIONS.map((glyph) =>
+        `<button class="cursor-picker-option ${glyph === current ? 'is-selected' : ''}" data-glyph="${glyph}">${glyph}</button>`
+      ).join('')}
+    `;
     grid.querySelectorAll('.cursor-picker-option').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const glyph = btn.dataset.glyph;
-        Cursor.setGlyph(glyph);
+      btn.addEventListener('click', () => {
+        DisplayPrefs.setGlyph(btn.dataset.glyph);
         grid.querySelectorAll('.cursor-picker-option').forEach((b) => b.classList.toggle('is-selected', b === btn));
-
-        const code = Auth.getCurrentCode();
-        if (code) {
-          try { await Store.setCursorGlyph(code, glyph); } catch (e) { console.warn('Could not save cursor choice', e); }
-        }
       });
     });
   }
@@ -60,9 +64,9 @@ const CursorPicker = (() => {
     panel.style.right = '28px';
   }
 
-  function open(currentGlyph) {
+  function open() {
     ensurePanel();
-    renderOptions(currentGlyph);
+    renderOptions(DisplayPrefs.getGlyph());
     position();
     panel.style.display = 'flex';
   }
@@ -71,12 +75,10 @@ const CursorPicker = (() => {
     if (panel) panel.style.display = 'none';
   }
 
-  async function toggle() {
+  function toggle() {
     ensurePanel();
     if (panel.style.display === 'flex') { close(); return; }
-    const code = Auth.getCurrentCode();
-    const user = code ? await FirestoreDB.getDoc('users', code) : null;
-    open(user?.cursorGlyph || '🏎️');
+    open();
   }
 
   return { toggle, open, close };

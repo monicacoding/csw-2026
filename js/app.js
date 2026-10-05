@@ -104,7 +104,7 @@ const App = (() => {
   let currentUser = null;
 
   async function init() {
-    Cursor.init();
+    DisplayPrefs.boot();
     Ambient.init();
     await loadWeekConfig();
 
@@ -525,20 +525,18 @@ const App = (() => {
 
   // ---------------- Hub ----------------
   // Deliberately stays synchronous, unlike most of this file's other
-  // handlers — against MockDB, re-fetching the user doc here to grab a
-  // fresh cursorGlyph was free (a synchronous localStorage read), but
-  // against real Firestore that's a genuine network round-trip, and it's
-  // not worth blocking the *entire* hub render (badge, track, activity
-  // board, all of it) on a fetch whose only payoff is a cosmetic cursor
-  // glyph. Trusting currentUser.cursorGlyph directly can very briefly lag
-  // one interaction behind a change made via the cursor picker (which
-  // fetches its own fresh copy every time it opens — see
-  // CursorPicker.toggle), but that's a fine trade for not stalling the
-  // whole hub on it.
+  // handlers — re-fetching the user doc here would be a genuine network
+  // round-trip blocking the *entire* hub render (badge, track, activity
+  // board, all of it) for what is only display preferences.
+  // DisplayPrefs.applyUser applies the cursor glyph from `currentUser` the
+  // first time it sees a given login and then leaves it alone: this runs on
+  // every re-render, often with a `currentUser` older than a just-made
+  // change in the cursor picker (which updates DisplayPrefs directly), so
+  // re-applying the doc every time would flip a fresh choice back.
   function showHub() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appRoot').style.display = 'block';
-    Cursor.setGlyph(currentUser.cursorGlyph || '🏎️');
+    DisplayPrefs.applyUser(currentUser);
     renderPlayerBadge();
     renderDevModePanel();
     renderAdminPanelButton();
